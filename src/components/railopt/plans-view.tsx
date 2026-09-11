@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
-import { plans, blocks, maintenanceRequests, conflicts, type SimPlan } from '@/data/simulated-data'
+import { plans, blocks, maintenanceRequests, conflicts, type SimPlan, type SimBlock } from '@/data/simulated-data'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -23,7 +23,8 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { useAppStore } from '@/store/app-store'
-import { FileText, Calendar, GitBranch, Clock, CheckCircle2, AlertCircle, ChevronRight, Download, Share2, Printer, FileDown, GitCompare, Trophy, Sparkles, ShieldAlert, Plus, Trash2, CalendarPlus, Boxes, Gauge, Bot } from 'lucide-react'
+import { useDeepLink } from '@/hooks/use-deep-link'
+import { FileText, Calendar, CalendarClock, GitBranch, Clock, CheckCircle2, AlertCircle, ChevronRight, Download, Share2, Printer, FileDown, GitCompare, Trophy, Sparkles, ShieldAlert, Plus, Trash2, CalendarPlus, Boxes, Gauge, Bot } from 'lucide-react'
 import { PrintHeader } from './print-header'
 import { EmptyState } from './empty-state'
 import { toast } from 'sonner'
@@ -31,30 +32,8 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useIsMobile } from '@/hooks/use-mobile'
 
 // Custom plans created by the user (persisted to localStorage)
-interface CustomPlan extends SimPlan {
-  isCustom: boolean
-}
-
-const CUSTOM_PLANS_KEY = 'railopt-custom-plans'
-
-function loadCustomPlans(): CustomPlan[] {
-  try {
-    const raw = localStorage.getItem(CUSTOM_PLANS_KEY)
-    if (!raw) return []
-    const parsed = JSON.parse(raw) as CustomPlan[]
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
-  }
-}
-
-function persistCustomPlans(list: CustomPlan[]) {
-  try {
-    localStorage.setItem(CUSTOM_PLANS_KEY, JSON.stringify(list))
-  } catch {
-    // storage unavailable — plans stay in memory for this session
-  }
-}
+// Shared with Planning view via @/lib/custom-plans
+import { loadCustomPlans, persistCustomPlans, loadManualBlocks, type CustomPlan, type ManualBlock } from '@/lib/custom-plans'
 
 const statusColors: Record<string, string> = {
   draft: 'bg-muted text-muted-foreground',
@@ -170,10 +149,10 @@ async function sharePlan(plan: typeof plans[0], planBlocks: typeof blocks) {
   }
 }
 
-function exportAllPlansAsJSON(planList: (typeof plans[0])[]) {
+function exportAllPlansAsJSON(planList: SimPlan[], knownBlocks: SimBlock[]) {
   const exportData = {
     plans: planList.map((plan) => {
-      const planBlocks = blocks.filter((b) => plan.blockIds.includes(b.id))
+      const planBlocks = knownBlocks.filter((b) => plan.blockIds.includes(b.id))
       const planRequests = maintenanceRequests.filter((mr) => planBlocks.some((b) => b.maintenanceReqIds.includes(mr.id)))
       return {
         plan: { id: plan.id, name: plan.name, type: plan.type, startDate: plan.startDate, endDate: plan.endDate, status: plan.status, version: plan.version },
@@ -193,11 +172,11 @@ function exportAllPlansAsJSON(planList: (typeof plans[0])[]) {
   toast.success('All plans exported', { description: `${planList.length} plans downloaded as JSON` })
 }
 
-function exportAllPlansAsCSV(planList: (typeof plans[0])[]) {
+function exportAllPlansAsCSV(planList: SimPlan[], knownBlocks: SimBlock[]) {
   const headers = ['Plan', 'Block ID', 'Name', 'Section', 'From', 'To', 'Start', 'End', 'Duration (min)', 'Department', 'Line', 'AI Recommended']
   const rows: string[] = []
   for (const plan of planList) {
-    const planBlocks = blocks.filter((b) => plan.blockIds.includes(b.id))
+    const planBlocks = knownBlocks.filter((b) => plan.blockIds.includes(b.id))
     for (const b of planBlocks) {
       rows.push([plan.name, b.id, b.name, b.section, b.stationFrom, b.stationTo, b.startTime, b.endTime, String(b.duration), b.department, b.line, b.isAiRecommended ? 'Yes' : 'No'].join(','))
     }
@@ -355,12 +334,13 @@ function PlanComparisonTable() {
 }
 
 export function PlansView() {
-  const { setActiveView, currentUserName } = useAppStore()
+  const { setActiveView, currentUserName, setActivePlanId } = useAppStore()
   const isMobile = useIsMobile()
   const [compareMode, setCompareMode] = useState(false)
   const [expandedPlanId, setExpandedPlanId] = useState<string | null>(null)
   // Custom plan wizard
   const [customPlans, setCustomPlans] = useState<CustomPlan[]>([])
+  const [manualBlocks, setManualBlocks] = useState<ManualBlock[]>([])
   const [createOpen, setCreateOpen] = useState(false)
   const [newPlanName, setNewPlanName] = useState('')
   const [newPlanType, setNewPlanType] = useState<'weekly' | 'monthly'>('weekly')
@@ -372,27 +352,40 @@ export function PlansView() {
   // Load persisted custom plans on mount (async hydration to avoid render cascade)
   useEffect(() => {
     const t = setTimeout(() => {
-      try {
-        const raw = localStorage.getItem(CUSTOM_PLANS_KEY)
-        if (!raw) return
-        const parsed = JSON.parse(raw) as CustomPlan[]
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setCustomPlans(parsed)
-        }
-      } catch {
-        // ignore malformed persisted data
+      const persisted = loadCustomPlans()
+      if (persisted.length > 0) {
+        setCustomPlans(persisted)
+      }
+      const persistedManual = loadManualBlocks()
+      if (persistedManual.length > 0) {
+        setManualBlocks(persistedManual)
       }
     }, 0)
     return () => clearTimeout(t)
   }, [])
 
+  // Deep links from command palette (expand plan / open create wizard)
+  useDeepLink((type, id) => {
+    if (type === 'plan' && id) {
+      setExpandedPlanId(id)
+    } else if (type === 'plan-new') {
+      setCreateOpen(true)
+    }
+  })
+
   // Base plans first, then user-created plans
   const allPlans = useMemo(() => [...customPlans, ...plans], [customPlans])
+
+  // All known blocks = simulated + manual blocks created in Planning (persisted)
+  const knownBlocks = useMemo(() => [...blocks, ...manualBlocks], [manualBlocks])
+
+  const handleExportJSON = () => exportAllPlansAsJSON(allPlans, knownBlocks)
+  const handleExportCSV = () => exportAllPlansAsCSV(allPlans, knownBlocks)
 
   // Portfolio stats strip
   const stats = useMemo(() => {
     const allBlockIds = new Set(allPlans.flatMap((p) => p.blockIds))
-    const allBlocks = blocks.filter((b) => allBlockIds.has(b.id))
+    const allBlocks = knownBlocks.filter((b) => allBlockIds.has(b.id))
     const totalMinutes = allBlocks.reduce((s, b) => s + b.duration, 0)
     const aiCount = allBlocks.filter((b) => b.isAiRecommended).length
     return {
@@ -401,7 +394,7 @@ export function PlansView() {
       hours: Math.round(totalMinutes / 60),
       aiPct: allBlocks.length > 0 ? Math.round((aiCount / allBlocks.length) * 100) : 0,
     }
-  }, [allPlans])
+  }, [allPlans, knownBlocks])
 
   const handleCreatePlan = () => {
     const name = newPlanName.trim()
@@ -505,10 +498,10 @@ export function PlansView() {
               <Button variant="secondary" size="sm" className="h-9 min-h-[44px] sm:h-auto"><FileText className="h-4 w-4 mr-1" />Export</Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={exportAllPlansAsJSON}>
+              <DropdownMenuItem onClick={handleExportJSON}>
                 <Download className="h-3.5 w-3.5 mr-2" /> All Plans (JSON)
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={exportAllPlansAsCSV}>
+              <DropdownMenuItem onClick={handleExportCSV}>
                 <FileText className="h-3.5 w-3.5 mr-2" /> All Plans (CSV)
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -577,7 +570,7 @@ export function PlansView() {
         ) : null}
         {allPlans.map((plan, planIdx) => {
           const isCustomPlan = (plan as CustomPlan).isCustom === true
-          const planBlocks = blocks.filter((b) => plan.blockIds.includes(b.id))
+          const planBlocks = knownBlocks.filter((b) => plan.blockIds.includes(b.id))
           const planRequests = maintenanceRequests.filter((mr) => planBlocks.some((b) => b.maintenanceReqIds.includes(mr.id)))
           const stepIndex = getStepIndex(plan.status)
           const totalDuration = planBlocks.reduce((sum, b) => sum + b.duration, 0)
@@ -612,6 +605,24 @@ export function PlansView() {
                     )}
                     <Badge variant="outline" className={statusColors[plan.status]}>{statusLabels[plan.status]}</Badge>
                     <Badge variant="outline" className="text-xs">{plan.type === 'weekly' ? 'Weekly' : 'Monthly'}</Badge>
+                    {isCustomPlan && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 text-xs gap-1 text-[#283593] hover:text-[#0d47a1] hover:bg-[#e8eaf6] dark:text-[#7986cb] dark:hover:bg-[#0d1442]/40"
+                        aria-label={`Open ${plan.name} in Planning view`}
+                        onClick={() => {
+                          setActivePlanId(plan.id)
+                          setActiveView('planning')
+                          toast.info(`Opening "${plan.name}" in Planning`, {
+                            description: 'Blocks you add there are linked to this plan',
+                          })
+                        }}
+                      >
+                        <CalendarClock className="h-3.5 w-3.5" />
+                        Open in Planning
+                      </Button>
+                    )}
                     {isCustomPlan && (
                       <Button
                         variant="ghost"

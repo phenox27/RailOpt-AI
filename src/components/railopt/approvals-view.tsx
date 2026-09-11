@@ -25,6 +25,8 @@ import {
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
+import { toast } from 'sonner'
+import { Undo2 } from 'lucide-react'
 
 type ApprovalTab = 'my-action' | 'dept-verification' | 'control-office' | 'all' | 'timeline'
 
@@ -150,25 +152,44 @@ export function ApprovalsView() {
     setLocalPlans(prev => prev.map(p => p.id === id ? { ...p, status: 'rejected' as const } : p))
   }, [])
 
-  // Batch approve all pending items
+  // Batch approve all pending items (with undo)
   const handleBatchApprove = useCallback(() => {
     setBatchProcessing(true)
-    // Process all pending items in current view
     const itemsToProcess = currentItems.filter(({ item }) => item.status !== 'approved' && item.status !== 'rejected')
+    // Snapshot current state so the batch can be undone
+    const snapshotBlocks = localBlocks
+    const snapshotPlans = localPlans
+    const undoBatch = () => {
+      setLocalBlocks(snapshotBlocks)
+      setLocalPlans(snapshotPlans)
+      toast.info('Batch approval undone', { description: 'All items restored to their previous status' })
+    }
     setTimeout(() => {
       itemsToProcess.forEach(({ item }) => {
         handleApprove(item.id)
       })
       setBatchProcessing(false)
       setBatchConfirmOpen(null)
+      toast.success(`${itemsToProcess.length} item${itemsToProcess.length === 1 ? '' : 's'} approved`, {
+        description: 'Advanced to the next workflow stage',
+        action: { label: 'Undo', icon: <Undo2 className="h-3.5 w-3.5" />, onClick: undoBatch },
+        duration: 8000,
+      })
     }, 600)
-  }, [currentItems, handleApprove])
+  }, [currentItems, handleApprove, localBlocks, localPlans])
 
-  // Batch reject all pending items
+  // Batch reject all pending items (with undo)
   const handleBatchReject = useCallback(() => {
     if (!batchRejectReason.trim()) return
     setBatchProcessing(true)
     const itemsToProcess = currentItems.filter(({ item }) => item.status !== 'approved' && item.status !== 'rejected')
+    const snapshotBlocks = localBlocks
+    const snapshotPlans = localPlans
+    const undoBatch = () => {
+      setLocalBlocks(snapshotBlocks)
+      setLocalPlans(snapshotPlans)
+      toast.info('Batch rejection undone', { description: 'All items restored to their previous status' })
+    }
     setTimeout(() => {
       itemsToProcess.forEach(({ item }) => {
         handleReject(item.id, batchRejectReason.trim())
@@ -176,8 +197,13 @@ export function ApprovalsView() {
       setBatchProcessing(false)
       setBatchRejectReason('')
       setBatchConfirmOpen(null)
+      toast.success(`${itemsToProcess.length} item${itemsToProcess.length === 1 ? '' : 's'} rejected`, {
+        description: `Reason: “${batchRejectReason.trim().slice(0, 80)}”`,
+        action: { label: 'Undo', icon: <Undo2 className="h-3.5 w-3.5" />, onClick: undoBatch },
+        duration: 8000,
+      })
     }, 600)
-  }, [currentItems, handleReject, batchRejectReason])
+  }, [currentItems, handleReject, batchRejectReason, localBlocks, localPlans])
 
   const batchableCount = currentItems.filter(({ item }) => item.status !== 'approved' && item.status !== 'rejected').length
 
@@ -322,7 +348,7 @@ export function ApprovalsView() {
       {/* Tabs */}
       <div className="px-4 sm:px-6">
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ApprovalTab)}>
-          <div className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
+          <div className="overflow-x-auto shrink-0 -mx-4 px-4 sm:mx-0 sm:px-0">
             <TabsList className="h-9">
               <TabsTrigger value="my-action" className="text-xs gap-1.5 whitespace-nowrap">
                 Pending My Action

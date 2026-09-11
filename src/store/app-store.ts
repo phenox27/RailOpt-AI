@@ -12,6 +12,14 @@ export type ViewId =
 
 export type Role = 'admin' | 'planner' | 'control_office' | 'engineering' | 'snt' | 'traction'
 
+export type DeepLinkType = 'request' | 'request-new' | 'conflict' | 'block' | 'plan' | 'plan-new'
+
+export interface DeepLink {
+  type: DeepLinkType
+  id: string
+  ts: number
+}
+
 export interface NavItem {
   id: ViewId
   label: string
@@ -70,6 +78,11 @@ interface AppState {
   // Notifications
   notificationCount: number
   setNotificationCount: (count: number) => void
+
+  // Deep linking (command palette → view selection)
+  deepLink: DeepLink | null
+  pushDeepLink: (type: DeepLinkType, id?: string) => void
+  clearDeepLink: () => void
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -114,4 +127,8 @@ export const useAppStore = create<AppState>((set) => ({
   
   notificationCount: 3,
   setNotificationCount: (count) => set({ notificationCount: count }),
+
+  deepLink: null,
+  pushDeepLink: (type, id = '') => set({ deepLink: { type, id, ts: Date.now() } }),
+  clearDeepLink: () => set({ deepLink: null }),
 }))

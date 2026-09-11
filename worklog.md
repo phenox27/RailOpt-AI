@@ -2019,3 +2019,46 @@ Stage Summary:
 - Fixed a subtle pre-existing flex layout bug that made Settings tabs unusable on tall panels
 - Unresolved/risks: custom plans don't yet appear in Planning view timeline (base plans only) — acceptable for demo; localStorage data is per-browser; settings-view still has one legacy "handleSave" toast pattern for tabs without persistence beyond what's implemented
 - Next round suggestions: (1) custom plan block assignment flow (pick blocks in Planning for a custom plan), (2) invite-user → DB persistence via Prisma User model, (3) polish Approvals batch actions UX, (4) consider extracting "flex-strip shrink-0" lesson: audit other overflow-x-auto wrappers inside h-full flex columns (top-bar, audit-view)
+
+---
+Task ID: cron-review-2
+Agent: main (Z.ai Code, webDevReview cron)
+Task: QA assessment + new features (Command Palette real search, Approvals batch undo, Custom Plan ↔ Planning integration) + styling/a11y polish
+
+Work Log:
+- QA baseline: dev server healthy, all 8 views render, only console noise was the logo.png aspect-ratio warning → fixed this round
+- BUG FIX (console warning): next/image XOR warning ("width or height modified, but not the other"). Root cause: logo.png is 3:2 (1536×1024); in small square containers the auto/auto + max constraints sometimes rendered width == attribute while height changed → warning. FIX: created square `public/logo-icon.png` (256×256 crop of the train mark via sharp, crop left=55 top=235 470×470) and switched all 5 small usages (app-sidebar, government-header, government-footer, landing nav, landing footer) to it with explicit square `style={{width:H,height:H}}` + `object-contain`; footer needed `max-w-none` (parent border + Tailwind preflight max-width:100% shrank it 20→18px). Verified: console clean.
+- NEW FEATURE A — Command Palette real search (command-palette.tsx):
+  * Searches live datasets: maintenance requests (title/id/section/category/stations), blocks (planner+admin), conflicts, plans, trains — role-aware, max 4 per group
+  * Deep links: selecting a result navigates AND opens the target (request→drawer, conflict→impact panel selection, block→planner detail panel, plan→expanded card). New store fields: deepLink/pushDeepLink/clearDeepLink + shared hook `use-deep-link.ts` (setTimeout-0 consumption to satisfy react-hooks/set-state-in-effect; latest-handler via ref-in-effect)
+  * Wired deep-link consumption into maintenance-view, timetable-view, planning-view, plans-view
+  * Quick actions now searchable by keywords ("create", "theme", "offline"): Run AI Optimization, Create Maintenance Request, Create New Plan, Go Online/Offline, Toggle Theme — data-driven array + actionMatches
+  * Recent commands persisted to localStorage 'railopt-recent-commands'
+  * Footer kbd-hint bar (↑↓ navigate / ↵ open / esc close); styled empty state with hints
+  * UI infra: ui/command.tsx CommandDialog now forwards `commandProps` to the cmdk Command primitive (was being swallowed by Dialog spread → shouldFilter never applied). Palette uses shouldFilter:false + own matching; Navigate/Actions groups render query-aware
+- NEW FEATURE B — Approvals batch undo: Approve All / Reject All now snapshot localBlocks/localPlans and show sonner toast with **Undo** action (8s window) restoring the snapshot; verified: 6 items approved → Undo → "6 awaiting you" restored
+- NEW FEATURE C — Custom Plan ↔ Planning integration (closes last round's gap):
+  * New shared lib `src/lib/custom-plans.ts`: CustomPlan type, load/persist ('railopt-custom-plans'), addBlockToCustomPlan, ManualBlock + load/persist ('railopt-manual-blocks')
+  * Planning view: plan selector (Select) in plan info strip — Standard Plans + My Custom Plans groups; Custom Plan badge; Draft status badge; date-strip clamps into plan window; manual blocks persist to localStorage and auto-link to the ACTIVE custom plan (planId + blockIds); effectivePlanBlockIds only includes manual blocks of the active plan; consumes store.activePlanId (Open-in-Planning)
+  * Plans view: "Open in Planning" button on custom plan cards (sets activePlanId + navigates + toast); stats & per-card counts include persisted manual blocks (knownBlocks); export JSON/CSV now include custom plans + manual blocks — ALSO fixed latent bug: export handlers were passed the click Event as planList (now proper closures)
+  * E2E VERIFIED: create "Monsoon Prep — Test" plan → Open in Planning → selector shows it, badges Draft+Custom, window Sep 14-20 2026 → Manual Add Block → block persisted with planId, plan.blockIds=[blockId] → Plans card shows "1 blocks", stats 6 blocks/3 plans → selector switches back to standard plans cleanly
+- STYLING/A11Y POLISH:
+  * globals.css: themed ::selection (saffron), Firefox scrollbar theming (scrollbar-width/color), prefers-reduced-motion kill-switch for decorative animations, explicit saffron :focus-visible ring (light #e07b1a / dark #ffb066)
+  * maintenance-table: sticky header (sticky top-0 z-10 + backdrop-blur), removed hardcoded #D7DEE6 borders (10 occurrences in maintenance-table + request-detail-drawer) → theme-aware border-border (dark-mode fix)
+  * approvals-view: added shrink-0 to tabs overflow-x-auto wrapper (preemptive fix for the Settings-style flex-strip collapse)
+  * Responsive bug FIXED: maintenance content area crushed to 24px height on short viewports (1280×578) → min-h-[280px] + root overflow-y-auto; verified contentH 280px, 12 rows visible, sticky thead works
+- ENV INCIDENT: dev server OOM-killed twice (dmesg: next-server 2GB RSS global OOM) during parallel edit+test cycles; learned that tool-spawned background processes do NOT survive between Bash tool calls in this sandbox (system starts dev itself at session start). Workaround: single combined Bash calls (start server + warm + test). Recommend: avoid mass edits while Chrome+dev are both hot.
+
+Verification Results (agent-browser):
+- Console: 0 errors / 0 warnings after logo fix (cleared + fresh reload)
+- Palette: Ctrl+K → "12302" → conflict + train results; Enter → Timetable with conflict impact panel open. "track renewal" → maintenance drawer opened on mr-001. "create new plan" → Plans wizard auto-opened
+- Approvals: Approve All (6) → confirm dialog → toast with Undo → undo restores counts ✓
+- Custom plans: full create→open→add-block→counts round trip ✓ (localStorage verified)
+- Dark mode: maintenance table borders correct, sticky header, no clipped content
+- Lint: 0 errors
+
+Stage Summary:
+- Shipped: real cross-dataset command palette with deep links, batch-approval undo, full custom-plan↔planning integration with persistence, responsive/table/a11y polish, logo warning fix
+- All buttons remain functional; team names untouched (Dhittika, Jeet, Diya, Debarshi, Rupam, Alivia only)
+- Unresolved/risks: (1) dev server OOM under heavy parallel edit+compile+browser load — keep edits incremental; (2) manual blocks are per-browser localStorage (not DB) — same caveat as custom plans; (3) planning custom-plan selection resets when switching views (component state); (4) exports of custom plans include manual blocks but not their AI metadata (empty by design)
+- Next round suggestions: (1) DB persistence via Prisma for custom plans + manual blocks + invited users; (2) per-role landing view after login (control office → timetable, engineering → maintenance); (3) drag-and-drop block rescheduling on the timeline; (4) printable corridor summary PDF per custom plan

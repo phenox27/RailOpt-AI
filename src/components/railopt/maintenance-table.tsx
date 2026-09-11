@@ -152,10 +152,10 @@ export function MaintenanceTable({ requests, onRequestClick }: MaintenanceTableP
   }
 
   return (
-    <div className="rounded-lg border overflow-hidden" style={{ borderColor: '#D7DEE6' }}>
+    <div className="rounded-lg border overflow-hidden border-border">
       <Table>
-        <TableHeader>
-          <TableRow className="bg-muted/40 hover:bg-muted/40">
+        <TableHeader className="sticky top-0 z-10">
+          <TableRow className="bg-muted/40 hover:bg-muted/40 backdrop-blur-sm supports-[backdrop-filter]:bg-muted/60">
             <TableHead className="w-[40px] text-center text-[11px] font-semibold text-muted-foreground">#</TableHead>
             <TableHead className="min-w-[200px] text-[11px] font-semibold text-muted-foreground">
               <button className="flex items-center hover:text-foreground" onClick={() => handleSort('title')} aria-label="Sort by title">
@@ -203,13 +203,12 @@ export function MaintenanceTable({ requests, onRequestClick }: MaintenanceTableP
                 key={req.id}
                 idx={idx}
                 className={cn(
-                  'cursor-pointer transition-all duration-150 group/row',
+                  'cursor-pointer transition-all duration-150 group/row border-border',
                   'hover:bg-muted/60',
                   // Alternating row striping
                   idx % 2 === 1 && 'bg-muted/20',
                 )}
                 style={{
-                  borderColor: '#D7DEE6',
                   // Left border color matching department (visible on hover via CSS)
                   borderLeft: `3px solid transparent`,
                 }}

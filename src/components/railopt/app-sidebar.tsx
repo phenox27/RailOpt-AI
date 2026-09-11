@@ -67,12 +67,12 @@ export function AppSidebar() {
                 <div className="absolute -inset-0.5 rounded-lg bg-gradient-to-br from-[#FF9933] via-white to-[#138808] opacity-60" />
                 <div className="relative size-8 rounded-md bg-white dark:bg-[#1a237e] flex items-center justify-center overflow-hidden shadow-sm">
                   <Image
-                    src="/logo.png"
+                    src="/logo-icon.png"
                     alt="RailOpt AI"
                     width={28}
                     height={28}
                     className="object-contain"
-                  style={{ width: 'auto', height: 'auto', maxWidth: '1.5rem', maxHeight: '1.5rem' }}
+                    style={{ width: 28, height: 28 }}
                     priority
                   />
                 </div>

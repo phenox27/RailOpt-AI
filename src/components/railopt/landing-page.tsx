@@ -395,12 +395,12 @@ function StickyNavBar({ onEnterApp, onSignUp }: { onEnterApp: () => void; onSign
             {/* Logo + Name */}
             <a href="#" className="flex items-center gap-2.5 shrink-0" onClick={(e) => { e.preventDefault(); window.scrollTo({ top: 0, behavior: 'smooth' }) }}>
               <Image
-                src="/logo.png"
+                src="/logo-icon.png"
                 alt="RailOpt AI"
                 width={36}
                 height={36}
-                className="rounded-lg"
-                style={{ width: 'auto', height: 'auto', maxWidth: '2.25rem', maxHeight: '2.25rem' }}
+                className="rounded-lg bg-white/95 object-contain p-0.5"
+                style={{ width: 36, height: 36 }}
               />
               <span className={`font-bold text-lg tracking-tight transition-colors duration-300 ${scrolled ? 'text-white' : 'text-white'}`}>
                 RailOpt AI
@@ -606,12 +606,12 @@ function HeroSection({ onEnterApp, onSignUp }: { onEnterApp: () => void; onSignU
           className="mb-6"
         >
           <Image
-            src="/logo.png"
+            src="/logo-icon.png"
             alt="RailOpt AI Logo"
             width={80}
             height={80}
-            className="rounded-xl shadow-lg shadow-black/30"
-            style={{ width: 'auto', height: 'auto', maxWidth: '5rem', maxHeight: '5rem' }}
+            className="rounded-xl bg-white/95 object-contain p-1 shadow-lg shadow-black/30"
+            style={{ width: 80, height: 80 }}
             priority
           />
         </motion.div>

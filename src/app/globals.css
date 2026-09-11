@@ -683,3 +683,49 @@
 .badge-bounce {
   animation: badge-bounce 2s ease-in-out infinite;
 }
+
+/* ===== R10: Accessibility & Cross-browser Polish ===== */
+
+/* Themed text selection (saffron tint, works in light & dark) */
+::selection {
+  background: color-mix(in srgb, #ff9933 30%, transparent);
+  color: inherit;
+}
+.dark ::selection {
+  background: color-mix(in srgb, #ff9933 40%, transparent);
+}
+
+/* Firefox scrollbar theming (matches webkit styling above) */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+/* Respect users who prefer reduced motion: disable decorative animations */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .float-gentle,
+  .priority-pulse,
+  .pulse-dot,
+  .badge-bounce,
+  .workflow-line-pulse {
+    animation: none !important;
+  }
+}
+
+/* Keyboard-only focus ring: consistent saffron ring, never on mouse clicks */
+:focus-visible {
+  outline: 2px solid #e07b1a;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.dark :focus-visible {
+  outline-color: #ffb066;
+}

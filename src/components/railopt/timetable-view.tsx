@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -15,6 +15,7 @@ import { conflicts, trains, type SimConflict } from '@/data/simulated-data'
 import { motion, AnimatePresence } from 'framer-motion'
 import { cn } from '@/lib/utils'
 import { useIsMobile } from '@/hooks/use-mobile'
+import { useDeepLink } from '@/hooks/use-deep-link'
 
 type TrainTypeFilter = 'all' | 'express' | 'passenger' | 'goods'
 type SeverityFilter = 'all' | 'critical' | 'warning' | 'info'
@@ -31,6 +32,14 @@ export function TimetableView() {
   const handleConflictSelect = (conflict: SimConflict) => {
     setSelectedConflict(conflict)
   }
+
+  // Deep link from command palette (select conflict)
+  useDeepLink((type, id) => {
+    if (type === 'conflict' && id) {
+      const conflict = localConflicts.find((c) => c.id === id)
+      if (conflict) setSelectedConflict(conflict)
+    }
+  })
 
   const handleCloseImpactPanel = () => {
     setSelectedConflict(null)

@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { Plus, Search, Wrench, Clock, AlertTriangle, CheckCircle2, Filter, ClipboardList, BarChart3, CalendarClock, ArrowUpDown, LayoutGrid } from 'lucide-react'
+import { useDeepLink } from '@/hooks/use-deep-link'
 import { EmptyState } from './empty-state'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -136,6 +137,19 @@ export function MaintenanceView() {
     setDrawerOpen(true)
   }
 
+  // Deep links from command palette (open request drawer / create dialog)
+  useDeepLink((type, id) => {
+    if (type === 'request' && id) {
+      const req = requests.find((r) => r.id === id)
+      if (req) {
+        setSelectedRequest(req)
+        setDrawerOpen(true)
+      }
+    } else if (type === 'request-new') {
+      setCreateOpen(true)
+    }
+  })
+
   const handleCreate = (newReq: SimMaintenanceRequest) => {
     const sevMap: Record<string, number> = { low: 15, medium: 35, high: 65, critical: 90 }
     const riskMap: Record<string, number> = { low: 5, medium: 15, high: 35, critical: 55 }
@@ -152,7 +166,7 @@ export function MaintenanceView() {
   const activeFilterCount = [deptFilter, statusFilter, severityFilter].filter((f) => f !== 'all').length
 
   return (
-    <div className="flex flex-col h-full min-h-0">
+    <div className="flex flex-col h-full min-h-0 overflow-y-auto">
       {/* Header */}
       <div className="flex items-center justify-between px-4 sm:px-6 pt-4 sm:pt-6 pb-2 gap-3">
         <div className="flex items-center gap-3 min-w-0">
@@ -359,8 +373,8 @@ export function MaintenanceView() {
         </span>
       </div>
 
-      {/* Content area - Priority Matrix or Table */}
-      <div className="flex-1 min-h-0 px-4 sm:px-6 pb-4 sm:pb-6 overflow-auto">
+      {/* Content area - Priority Matrix or Table (min-h guards against crush on short viewports) */}
+      <div className="flex-1 min-h-[280px] px-4 sm:px-6 pb-4 sm:pb-6">
         {viewTab === 'matrix' ? (
           <motion.div
             initial={{ opacity: 0, y: 8 }}

@@ -340,7 +340,7 @@ export function RequestDetailDrawer({ request, open, onOpenChange, blocks = [] }
   return (
     <Sheet open={open} onOpenChange={(v) => { onOpenChange(v); if (!v) setInitialized(false) }}>
       <SheetContent side="right" className="sm:max-w-[480px] w-full overflow-y-auto p-0">
-        <SheetHeader className="p-6 pb-3 border-b" style={{ borderColor: '#D7DEE6' }}>
+        <SheetHeader className="p-6 pb-3 border-b" >
           <div className="flex items-start gap-3">
             <div className="flex-1 min-w-0">
               <SheetTitle className="text-lg leading-snug">{effectiveTitle}</SheetTitle>
@@ -371,7 +371,7 @@ export function RequestDetailDrawer({ request, open, onOpenChange, blocks = [] }
             </Badge>
           </div>
 
-          <Separator style={{ backgroundColor: '#D7DEE6' }} />
+          <Separator  />
 
           {/* ===== Status Progression Timeline ===== */}
           <div>
@@ -474,7 +474,7 @@ export function RequestDetailDrawer({ request, open, onOpenChange, blocks = [] }
             </div>
           </div>
 
-          <Separator style={{ backgroundColor: '#D7DEE6' }} />
+          <Separator  />
 
           {/* Priority Score */}
           <div>
@@ -507,7 +507,7 @@ export function RequestDetailDrawer({ request, open, onOpenChange, blocks = [] }
             </div>
           </div>
 
-          <Separator style={{ backgroundColor: '#D7DEE6' }} />
+          <Separator  />
 
           {/* Details */}
           <div>
@@ -551,7 +551,7 @@ export function RequestDetailDrawer({ request, open, onOpenChange, blocks = [] }
           {/* AI Recommendation */}
           {assignedBlock && (
             <>
-              <Separator style={{ backgroundColor: '#D7DEE6' }} />
+              <Separator  />
               <div>
                 <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-1.5">
                   <Brain className="w-3.5 h-3.5" />
@@ -577,7 +577,7 @@ export function RequestDetailDrawer({ request, open, onOpenChange, blocks = [] }
           )}
 
           {/* Risk Factors Summary */}
-          <Separator style={{ backgroundColor: '#D7DEE6' }} />
+          <Separator  />
           <div>
             <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-1.5">
               <AlertTriangle className="w-3.5 h-3.5" />
@@ -599,7 +599,7 @@ export function RequestDetailDrawer({ request, open, onOpenChange, blocks = [] }
             </div>
           </div>
 
-          <Separator style={{ backgroundColor: '#D7DEE6' }} />
+          <Separator  />
 
           {/* ===== Comments / Activity Log ===== */}
           <div>
@@ -665,7 +665,7 @@ export function RequestDetailDrawer({ request, open, onOpenChange, blocks = [] }
         </div>
 
         {/* ===== Action Buttons ===== */}
-        <SheetFooter className="p-6 pt-4 border-t bg-muted/50/50 print:hidden" style={{ borderColor: '#D7DEE6' }}>
+        <SheetFooter className="p-6 pt-4 border-t bg-muted/50/50 print:hidden" >
           <div className="flex gap-2 w-full">
             {/* Status-specific action buttons */}
             {currentStatus === 'pending' && (

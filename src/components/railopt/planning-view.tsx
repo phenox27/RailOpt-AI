@@ -1,12 +1,14 @@
 'use client'
 
-import { useState, useCallback, useMemo } from 'react'
-import { plans, blocks, conflicts, maintenanceRequests, corridors, type SimBlock } from '@/data/simulated-data'
+import { useState, useCallback, useMemo, useEffect } from 'react'
+import { plans, blocks, conflicts, maintenanceRequests, corridors, type SimBlock, type SimPlan } from '@/data/simulated-data'
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { loadCustomPlans, addBlockToCustomPlan, loadManualBlocks, persistManualBlocks, type CustomPlan } from '@/lib/custom-plans'
+import { useAppStore } from '@/store/app-store'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { BlockTimeline } from './block-timeline'
@@ -47,6 +49,7 @@ import { cn } from '@/lib/utils'
 import { format, parseISO, addDays, subDays, isToday } from 'date-fns'
 import { motion } from 'framer-motion'
 import { useIsMobile } from '@/hooks/use-mobile'
+import { useDeepLink } from '@/hooks/use-deep-link'
 import { PrintHeader } from './print-header'
 import { toast } from 'sonner'
 
@@ -63,9 +66,24 @@ const PLAN_STATUS_CONFIG: Record<string, { label: string; className: string }> =
 
 export function PlanningView() {
   const [planTab, setPlanTab] = useState<'weekly' | 'monthly'>('weekly')
-  const activePlan = plans.find((p) => p.type === planTab) || plans[0]
+  // Custom plans (from Plans view wizard) + which plan is being viewed
+  const [customPlans, setCustomPlans] = useState<CustomPlan[]>([])
+  const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null)
+  const storeActivePlanId = useAppStore((s) => s.activePlanId)
+  const setActivePlanId = useAppStore((s) => s.setActivePlanId)
+
+  const basePlan = plans.find((p) => p.type === planTab) || plans[0]
+  const activePlan: SimPlan = useMemo(() => {
+    if (selectedPlanId) {
+      const custom = customPlans.find((p) => p.id === selectedPlanId)
+      if (custom) return custom
+    }
+    return basePlan
+  }, [selectedPlanId, customPlans, basePlan])
+  const isCustomPlanActive = (activePlan as CustomPlan).isCustom === true
+
   const planStart = parseISO(activePlan.startDate)
-  const [selectedDate, setSelectedDate] = useState(activePlan.startDate)
+  const [selectedDate, setSelectedDate] = useState(basePlan.startDate)
   const [sectionFilter, setSectionFilter] = useState<string>('all')
   const [deptFilter, setDeptFilter] = useState<string>('all')
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null)
@@ -81,6 +99,44 @@ export function PlanningView() {
   const [customBlocks, setCustomBlocks] = useState<SimBlock[]>([])
   const isMobile = useIsMobile()
 
+  // Hydrate persisted manual blocks + custom plans (async to avoid render cascade)
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const persistedBlocks = loadManualBlocks()
+      if (persistedBlocks.length > 0) setCustomBlocks(persistedBlocks)
+      const persistedPlans = loadCustomPlans()
+      if (persistedPlans.length > 0) setCustomPlans(persistedPlans)
+    }, 0)
+    return () => clearTimeout(t)
+  }, [])
+
+  // Consume "Open in Planning" requests from the Plans view
+  useEffect(() => {
+    if (!storeActivePlanId) return
+    const t = setTimeout(() => {
+      const target = loadCustomPlans().find((p) => p.id === storeActivePlanId)
+      if (target) {
+        setCustomPlans((prev) => (prev.some((p) => p.id === target.id) ? prev : [...prev, target]))
+        setSelectedPlanId(target.id)
+        toast.info(`Viewing "${target.name}"`, {
+          description: 'Blocks you add are linked to this custom plan',
+        })
+      }
+      setActivePlanId(null)
+    }, 0)
+    return () => clearTimeout(t)
+  }, [storeActivePlanId, setActivePlanId])
+
+  // Clamp the selected day into the active plan window when switching plans
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setSelectedDate((cur) =>
+        cur < activePlan.startDate || cur > activePlan.endDate ? activePlan.startDate : cur
+      )
+    }, 0)
+    return () => clearTimeout(t)
+  }, [activePlan.startDate, activePlan.endDate])
+
   // Merge simulated blocks with locally created blocks + apply local overrides
   const allBlocks = useMemo(() => (
     [...blocks, ...customBlocks].map((b) => ({
@@ -92,6 +148,17 @@ export function PlanningView() {
 
   const rawSelectedBlock = allBlocks.find((b) => b.id === selectedBlockId) || null
   const selectedBlock = rawSelectedBlock
+
+  // Deep link from command palette (select block)
+  useDeepLink((type, id) => {
+    if (type === 'block' && id) {
+      const block = allBlocks.find((b) => b.id === id)
+      if (block) {
+        setSelectedBlockId(block.id)
+        if (isMobile) setDetailSheetOpen(true)
+      }
+    }
+  })
   const currentDate = parseISO(selectedDate)
   const goPrevDay = () => {
     const prev = subDays(currentDate, 1)
@@ -192,7 +259,15 @@ export function PlanningView() {
       aiReasoning: '',
       maintenanceReqIds: [],
     }
-    setCustomBlocks(prev => [...prev, newBlock])
+    setCustomBlocks(prev => {
+      const next = [...prev, newBlock]
+      persistManualBlocks(next as (SimBlock & { isManual: true })[])
+      return next
+    })
+    // Link the block to the active custom plan (persisted)
+    if (isCustomPlanActive) {
+      setCustomPlans(addBlockToCustomPlan(activePlan.id, newBlock.id))
+    }
     toast.success(`Block "${data.name}" added to the plan`, {
       description: `${data.section} · ${durationMin} min · ${format(parseISO(startISO), 'MMM d, HH:mm')}`,
     })
@@ -208,8 +283,8 @@ export function PlanningView() {
       if (deptFilter !== 'all' && b.department !== deptFilter) return false
       return true
     })
-    // Manual blocks always included (they belong to this plan)
-    ids = [...ids, ...customBlocks.map((b) => b.id)]
+    // Manual blocks belong to the plan they were created under
+    ids = [...ids, ...customBlocks.filter((b) => b.planId === activePlan.id).map((b) => b.id)]
     return ids
   }, [activePlan, allBlocks, sectionFilter, deptFilter, customBlocks])
 
@@ -306,7 +381,13 @@ export function PlanningView() {
           <h1 className="text-lg font-semibold text-foreground">Planning</h1>
         </div>
         <div className="flex items-center gap-2">
-          <Tabs value={planTab} onValueChange={(v) => setPlanTab(v as 'weekly' | 'monthly')}>
+          <Tabs
+            value={isCustomPlanActive ? 'custom-active' : planTab}
+            onValueChange={(v) => {
+              setPlanTab(v as 'weekly' | 'monthly')
+              setSelectedPlanId(null)
+            }}
+          >
             <TabsList className="h-8">
               <TabsTrigger value="weekly" className="text-xs px-3 h-7">Weekly</TabsTrigger>
               <TabsTrigger value="monthly" className="text-xs px-3 h-7">Monthly</TabsTrigger>
@@ -326,12 +407,57 @@ export function PlanningView() {
         </div>
       </div>
 
-      {/* Plan info strip */}
+      {/* Plan info strip — plan selector + status */}
       <div className="flex items-center gap-3 px-4 sm:px-6 pb-2 flex-wrap">
-        <span className="text-xs text-muted-foreground">{activePlan.name}</span>
+        <Select
+          value={activePlan.id}
+          onValueChange={(id) => {
+            const base = plans.find((p) => p.id === id)
+            if (base) {
+              setSelectedPlanId(null)
+              setPlanTab(base.type === 'monthly' ? 'monthly' : 'weekly')
+            } else {
+              setSelectedPlanId(id)
+              const custom = customPlans.find((p) => p.id === id)
+              toast.info(`Viewing "${custom?.name ?? 'custom plan'}"`, {
+                description: 'Blocks you add are linked to this custom plan',
+              })
+            }
+          }}
+        >
+          <SelectTrigger size="sm" className="w-full sm:w-[320px] text-xs h-9 min-h-[44px] sm:h-8 gap-1.5" aria-label="Select plan">
+            <CalendarClock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              <SelectLabel className="text-[10px]">Standard Plans</SelectLabel>
+              {plans.map((p) => (
+                <SelectItem key={p.id} value={p.id} className="text-xs">
+                  {p.name}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+            {customPlans.length > 0 && (
+              <SelectGroup>
+                <SelectLabel className="text-[10px]">My Custom Plans</SelectLabel>
+                {customPlans.map((p) => (
+                  <SelectItem key={p.id} value={p.id} className="text-xs">
+                    {p.name} · Custom
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            )}
+          </SelectContent>
+        </Select>
         <Badge variant="outline" className={cn('rounded-full text-[10px] px-2 py-0 h-5', PLAN_STATUS_CONFIG[activePlan.status]?.className || '')}>
           {PLAN_STATUS_CONFIG[activePlan.status]?.label || activePlan.status}
         </Badge>
+        {isCustomPlanActive && (
+          <Badge variant="outline" className="rounded-full text-[10px] px-2 py-0 h-5 bg-[#fff7ed] text-[#c2570b] border-[#fdba74] dark:bg-orange-950/30 dark:text-orange-400 dark:border-orange-800">
+            Custom Plan
+          </Badge>
+        )}
         <span className="text-xs text-muted-foreground">v{activePlan.version}</span>
       </div>
 

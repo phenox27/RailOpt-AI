@@ -28,12 +28,12 @@ export function GovernmentFooter() {
             <div className="flex items-center gap-2">
               <div className="w-5 h-5 rounded-full overflow-hidden border border-border/40 shrink-0">
                 <Image
-                  src="/logo.png"
+                  src="/logo-icon.png"
                   alt=""
                   width={20}
                   height={20}
-                  className="object-contain"
-                  style={{ width: 'auto', height: 'auto', maxWidth: '1.25rem', maxHeight: '1.25rem' }}
+                  className="object-contain max-w-none"
+                  style={{ width: 20, height: 20 }}
                 />
               </div>
               <span>

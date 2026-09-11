@@ -41,12 +41,12 @@ export function GovernmentHeader() {
             >
               <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-white/10 border border-white/20 flex items-center justify-center overflow-hidden backdrop-blur-sm">
                 <Image
-                  src="/logo.png"
-                  alt="Indian Railways Emblem"
+                  src="/logo-icon.png"
+                  alt="RailOpt AI emblem"
                   width={36}
                   height={36}
                   className="object-contain"
-                  style={{ width: 'auto', height: 'auto', maxWidth: '2rem', maxHeight: '2rem' }}
+                  style={{ width: 36, height: 36 }}
                   priority
                 />
               </div>
