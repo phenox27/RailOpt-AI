@@ -12,7 +12,7 @@ export type ViewId =
 
 export type Role = 'admin' | 'planner' | 'control_office' | 'engineering' | 'snt' | 'traction'
 
-export type DeepLinkType = 'request' | 'request-new' | 'conflict' | 'block' | 'plan' | 'plan-new'
+export type DeepLinkType = 'request' | 'request-new' | 'conflict' | 'block' | 'plan' | 'plan-new' | 'train'
 
 export interface DeepLink {
   type: DeepLinkType

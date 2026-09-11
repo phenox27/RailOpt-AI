@@ -4,7 +4,7 @@ import { useState, useCallback, useMemo, useEffect } from 'react'
 import { plans, blocks, conflicts, maintenanceRequests, corridors, type SimBlock, type SimPlan } from '@/data/simulated-data'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { loadCustomPlans, addBlockToCustomPlan, loadManualBlocks, persistManualBlocks, migrateLocalCustomPlans, migrateLocalManualBlocks, createServerManualBlock, linkServerCustomPlanBlock, updateServerManualBlock, type CustomPlan } from '@/lib/custom-plans'
-import { useAppStore } from '@/store/app-store'
+import { useAppStore, NAV_ITEMS } from '@/store/app-store'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -73,6 +73,9 @@ export function PlanningView() {
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null)
   const storeActivePlanId = useAppStore((s) => s.activePlanId)
   const setActivePlanId = useAppStore((s) => s.setActivePlanId)
+  const pushDeepLink = useAppStore((s) => s.pushDeepLink)
+  const setActiveView = useAppStore((s) => s.setActiveView)
+  const currentRole = useAppStore((s) => s.currentRole)
 
   const basePlan = plans.find((p) => p.type === planTab) || plans[0]
   const activePlan: SimPlan = useMemo(() => {
@@ -92,6 +95,8 @@ export function PlanningView() {
   const [isOptimizing, setIsOptimizing] = useState(false)
   const [optimizationDone, setOptimizationDone] = useState(false)
   const [manualFormOpen, setManualFormOpen] = useState(false)
+  // Pre-filled times for the manual form ("Create block here" from a free-hour toast)
+  const [manualFormPrefill, setManualFormPrefill] = useState<{ startTime?: string; endTime?: string } | null>(null)
   const [detailSheetOpen, setDetailSheetOpen] = useState(false)
   const [trackDataVisible, setTrackDataVisible] = useState(false)
   const [timelineMode, setTimelineMode] = useState<'timeline' | 'gantt' | 'crew'>('timeline')
@@ -382,6 +387,19 @@ export function PlanningView() {
   ), [planBlocks, selectedDate])
 
   // Click an hour bucket in the Corridor Utilization panel → select that hour's first block
+  // Open the manual form pre-filled with a 3h window starting at the given hour
+  // (capped at 23:59 so the form never crosses midnight)
+  const openPrefilledForm = useCallback((hour: number) => {
+    const pad = (n: number) => n.toString().padStart(2, '0')
+    const startTotal = hour * 60
+    const endTotal = Math.min(startTotal + 180, 23 * 60 + 59)
+    setManualFormPrefill({
+      startTime: `${pad(Math.floor(startTotal / 60))}:00`,
+      endTime: `${pad(Math.floor(endTotal / 60))}:${pad(endTotal % 60)}`,
+    })
+    setManualFormOpen(true)
+  }, [])
+
   const handleHourJump = useCallback((hour: number) => {
     const startOf = (b: SimBlock) => {
       const d = new Date(b.startTime)
@@ -399,11 +417,31 @@ export function PlanningView() {
       const dep = new Date(target.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       toast.success(`Inspecting ${target.name}`, { description: `Starts at ${dep}` })
     } else {
-      toast.info(`${hour.toString().padStart(2, '0')}:00–${(hour + 1).toString().padStart(2, '0')}:00 is free`, {
+      const hh = (n: number) => n.toString().padStart(2, '0')
+      toast.info(`${hh(hour)}:00–${hh(hour + 1)}:00 is free`, {
         description: 'No blocks in this hour — a good candidate slot for new maintenance work',
+        action: { label: 'Create block here', onClick: () => openPrefilledForm(hour) },
+        duration: 12000,
       })
     }
-  }, [utilDayBlocks, isMobile])
+  }, [utilDayBlocks, isMobile, openPrefilledForm])
+
+  // Click a departure-board row → jump to the Timetable view focused on that train.
+  // Respects role permissions: Timetable is visible to admin/planner/control office.
+  const handleTrainClick = useCallback((trainNumber: string, trainName: string) => {
+    const allowed = NAV_ITEMS.find((n) => n.id === 'timetable')?.roles.includes(currentRole)
+    if (!allowed) {
+      toast.error('Timetable view is not available for your role', {
+        description: 'Ask an Admin, Planner, or Control Office member to inspect this train',
+      })
+      return
+    }
+    pushDeepLink('train', trainNumber)
+    setActiveView('timetable')
+    toast.info(`Inspecting train ${trainNumber} ${trainName}`, {
+      description: 'Opened in Timetable & Conflicts with the row focused',
+    })
+  }, [pushDeepLink, setActiveView, currentRole])
 
   const totalBlocks = planBlocks.length
   const aiRecommended = planBlocks.filter((b) => b.isAiRecommended).length
@@ -627,7 +665,7 @@ export function PlanningView() {
             variant="outline"
             size="sm"
             className="text-xs h-9 min-h-[44px] sm:h-8 gap-1.5"
-            onClick={() => setManualFormOpen(true)}
+            onClick={() => { setManualFormPrefill(null); setManualFormOpen(true) }}
           >
             <Plus className="h-3.5 w-3.5" />
             <span className="hidden sm:inline">Manual Add Block</span>
@@ -839,7 +877,7 @@ export function PlanningView() {
                 <SheetTitle className="text-sm">Block Details</SheetTitle>
               </SheetHeader>
               <CorridorUtilization dayBlocks={utilDayBlocks} preview={dragPreview} selectedBlock={selectedBlock} onHourClick={handleHourJump} dayLabel={format(currentDate, 'EEE d MMM')} selectedHour={selectedBlock ? new Date(selectedBlock.startTime).getHours() : null} />
-              <NextDepartures className="mx-4 mt-3" />
+              <NextDepartures className="mx-4 mt-3" simDate={selectedDate} onTrainClick={handleTrainClick} />
               {detailContent}
             </SheetContent>
           </Sheet>
@@ -847,13 +885,13 @@ export function PlanningView() {
           selectedBlock ? (
             <div className="w-full lg:w-[340px] xl:w-[380px] border-l border-border overflow-y-auto bg-background">
               <CorridorUtilization dayBlocks={utilDayBlocks} preview={dragPreview} selectedBlock={selectedBlock} onHourClick={handleHourJump} dayLabel={format(currentDate, 'EEE d MMM')} selectedHour={selectedBlock ? new Date(selectedBlock.startTime).getHours() : null} />
-              <NextDepartures className="mx-4 mt-3" />
+              <NextDepartures className="mx-4 mt-3" simDate={selectedDate} onTrainClick={handleTrainClick} />
               {detailContent}
             </div>
           ) : (
             <div className="hidden lg:flex w-[340px] xl:w-[380px] border-l border-border flex-col overflow-y-auto bg-muted/10">
               <CorridorUtilization dayBlocks={utilDayBlocks} preview={dragPreview} className="bg-background" onHourClick={handleHourJump} dayLabel={format(currentDate, 'EEE d MMM')} selectedHour={selectedBlock ? new Date(selectedBlock.startTime).getHours() : null} />
-              <NextDepartures className="mx-4 mt-3" />
+              <NextDepartures className="mx-4 mt-3" simDate={selectedDate} onTrainClick={handleTrainClick} />
               <div className="flex-1 flex items-center justify-center py-10">
                 <div className="text-center text-muted-foreground px-4">
                   <Info className="h-8 w-8 mx-auto mb-2 opacity-30" />
@@ -866,11 +904,13 @@ export function PlanningView() {
         )}
       </div>
 
-      {/* Manual Block Form Dialog */}
+      {/* Manual Block Form Dialog — keyed per prefill so remounts apply pre-filled times */}
       <ManualBlockForm
+        key={manualFormPrefill ? `${manualFormPrefill.startTime ?? ''}-${manualFormPrefill.endTime ?? ''}` : 'no-prefill'}
         open={manualFormOpen}
         onOpenChange={setManualFormOpen}
         onSubmit={handleCreateManualBlock}
+        prefill={manualFormPrefill}
       />
     </div>
   )

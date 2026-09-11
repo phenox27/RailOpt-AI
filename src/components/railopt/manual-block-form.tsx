@@ -20,6 +20,8 @@ interface ManualBlockFormProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onSubmit?: (data: ManualBlockData) => void
+  /** Pre-filled times (e.g. "Create block here" from a free-hour toast) */
+  prefill?: { startTime?: string; endTime?: string } | null
 }
 
 export interface ManualBlockData {
@@ -56,13 +58,16 @@ const SECTION_STATIONS: Record<string, { from: string; to: string }> = {
   'NDLS-AGC': { from: 'New Delhi', to: 'Agra' },
 }
 
-export function ManualBlockForm({ open, onOpenChange, onSubmit }: ManualBlockFormProps) {
+export function ManualBlockForm({ open, onOpenChange, onSubmit, prefill }: ManualBlockFormProps) {
+  // Pre-filled times are baked into the initial state — the parent re-keys the
+  // form per prefill ("Create block here" from a free-hour toast) so a remount
+  // applies them without sync effects.
   const [name, setName] = useState('')
   const [section, setSection] = useState('')
   const [stationFrom, setStationFrom] = useState('')
   const [stationTo, setStationTo] = useState('')
-  const [startTime, setStartTime] = useState('01:00')
-  const [endTime, setEndTime] = useState('04:00')
+  const [startTime, setStartTime] = useState(prefill?.startTime ?? '01:00')
+  const [endTime, setEndTime] = useState(prefill?.endTime ?? '04:00')
   const [department, setDepartment] = useState('')
   const [line, setLine] = useState('')
 

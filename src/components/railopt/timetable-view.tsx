@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -27,19 +27,35 @@ export function TimetableView() {
   const [selectedConflict, setSelectedConflict] = useState<SimConflict | null>(null)
   const [selectedConflictForWorkflow, setSelectedConflictForWorkflow] = useState<SimConflict | null>(null)
   const [workflowOpen, setWorkflowOpen] = useState(false)
+  const [focusTrainNumber, setFocusTrainNumber] = useState<string | null>(null)
+  const timetableCardRef = useRef<HTMLDivElement>(null)
   const isMobile = useIsMobile()
 
   const handleConflictSelect = (conflict: SimConflict) => {
     setSelectedConflict(conflict)
   }
 
-  // Deep link from command palette (select conflict)
+  // Deep link from command palette (select conflict) or departure board (focus train)
   useDeepLink((type, id) => {
     if (type === 'conflict' && id) {
       const conflict = localConflicts.find((c) => c.id === id)
       if (conflict) setSelectedConflict(conflict)
     }
+    if (type === 'train' && id) {
+      setFocusTrainNumber(id)
+    }
   })
+
+  // Bring the Train Timetable card into view when a train focus arrives
+  // (scrollIntoView walks the whole scroll chain, so the card clears the
+  // conflict visualizer that sits above it)
+  useEffect(() => {
+    if (!focusTrainNumber) return
+    const t = setTimeout(() => {
+      timetableCardRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+    }, 80)
+    return () => clearTimeout(t)
+  }, [focusTrainNumber])
 
   const handleCloseImpactPanel = () => {
     setSelectedConflict(null)
@@ -136,96 +152,106 @@ export function TimetableView() {
         </div>
       </motion.div>
 
-      {/* Block Conflict Visualization */}
-      <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3, delay: 0.08 }}
-        className="px-4 sm:px-6"
-      >
-        <div className="flex items-center gap-2 mb-2">
-          <div className="flex items-center justify-center w-7 h-7 rounded-md bg-red-50 dark:bg-red-950/40 shrink-0">
-            <AlertTriangle className="w-4 h-4 text-red-500" />
+      {/* Main content — single scroll flow (viz + cards) so the timetable and
+          conflict cards keep usable heights on short viewports instead of being
+          squeezed to a sliver by the fixed-height conflict visualizer */}
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        <div className="px-4 sm:px-6 pt-3 pb-4 sm:pb-6 space-y-3 sm:space-y-4">
+          {/* Block Conflict Visualization */}
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3, delay: 0.08 }}
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <div className="flex items-center justify-center w-7 h-7 rounded-md bg-red-50 dark:bg-red-950/40 shrink-0">
+                <AlertTriangle className="w-4 h-4 text-red-500" />
+              </div>
+              <h2 className="text-sm font-semibold text-foreground">Block Conflict Visualization / ब्लॉक विरोध दृश्य</h2>
+            </div>
+            <BlockConflictVisualizer />
+          </motion.div>
+
+          {/* Cards row with optional impact panel */}
+          <div className="flex gap-3 sm:gap-4 items-start">
+            {/* Left: Two-panel layout (Timetable + Conflicts) */}
+            <div className={cn(
+              'grid gap-3 sm:gap-4 flex-1 min-w-0',
+              selectedConflict && !isMobile ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-2'
+            )}>
+              {/* Train Timetable */}
+              <motion.div
+                ref={timetableCardRef}
+                initial={{ opacity: 0, x: -12 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.3, delay: 0.1 }}
+                className="flex flex-col min-h-0"
+                style={{ scrollMarginTop: 12 }}
+              >
+                <Card className="flex flex-col h-[420px] border border-border">
+                  <CardHeader className="pb-2 pt-4 px-4">
+                    <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                      <TrainFront className="w-4 h-4 text-[#283593]" />
+                      Train Timetable
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="flex-1 min-h-0 px-4 pb-4 overflow-hidden">
+                    <TrainTimetable
+                      typeFilter={trainTypeFilter}
+                      onTypeFilterChange={setTrainTypeFilter}
+                      focusTrainNumber={focusTrainNumber}
+                      onClearFocus={() => setFocusTrainNumber(null)}
+                    />
+                  </CardContent>
+                </Card>
+              </motion.div>
+
+              {/* Conflict List */}
+              <motion.div
+                initial={{ opacity: 0, x: 12 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.3, delay: 0.1 }}
+                className="flex flex-col min-h-0"
+              >
+                <Card className="flex flex-col h-[420px] border border-border">
+                  <CardHeader className="pb-2 pt-4 px-4">
+                    <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 text-amber-600" />
+                      Conflict List
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="flex-1 min-h-0 px-4 pb-4 overflow-hidden">
+                    <ConflictList
+                      severityFilter={severityFilter}
+                      onSeverityFilterChange={setSeverityFilter}
+                      onResolve={handleResolve}
+                      localConflicts={localConflicts}
+                      onConflictsChange={setLocalConflicts}
+                      onConflictSelect={handleConflictSelect}
+                      onOpenWorkflow={handleOpenWorkflow}
+                    />
+                  </CardContent>
+                </Card>
+              </motion.div>
+            </div>
+
+            {/* Impact Panel — Desktop only (right side panel) */}
+            <AnimatePresence>
+              {selectedConflict && !isMobile && (
+                <motion.div
+                  key="impact-panel"
+                  initial={{ opacity: 0, x: 24, width: 0 }}
+                  animate={{ opacity: 1, x: 0, width: 380 }}
+                  exit={{ opacity: 0, x: 24, width: 0 }}
+                  transition={{ duration: 0.25 }}
+                  className="shrink-0 overflow-hidden border border-border rounded-lg bg-background shadow-md self-stretch"
+                >
+                  <ConflictImpactPanel conflict={selectedConflict} onClose={handleCloseImpactPanel} onOpenWorkflow={handleOpenWorkflow} />
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
-          <h2 className="text-sm font-semibold text-foreground">Block Conflict Visualization / ब्लॉक विरोध दृश्य</h2>
         </div>
-        <BlockConflictVisualizer />
-      </motion.div>
-
-      {/* Main content area with optional impact panel */}
-      <div className="flex-1 min-h-0 px-4 sm:px-6 pb-4 sm:pb-6 flex gap-3 sm:gap-4 overflow-auto">
-        {/* Left: Two-panel layout (Timetable + Conflicts) */}
-        <div className={cn(
-          'grid gap-3 sm:gap-4 flex-1 min-w-0',
-          selectedConflict && !isMobile ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-2'
-        )}>
-          {/* Train Timetable */}
-          <motion.div
-            initial={{ opacity: 0, x: -12 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.3, delay: 0.1 }}
-            className="flex flex-col min-h-0"
-          >
-            <Card className="flex flex-col min-h-0 border border-border flex-1">
-              <CardHeader className="pb-2 pt-4 px-4">
-                <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                  <TrainFront className="w-4 h-4 text-[#283593]" />
-                  Train Timetable
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="flex-1 min-h-0 px-4 pb-4 overflow-auto">
-                <TrainTimetable
-                  typeFilter={trainTypeFilter}
-                  onTypeFilterChange={setTrainTypeFilter}
-                />
-              </CardContent>
-            </Card>
-          </motion.div>
-
-          {/* Conflict List */}
-          <motion.div
-            initial={{ opacity: 0, x: 12 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.3, delay: 0.1 }}
-            className="flex flex-col min-h-0"
-          >
-            <Card className="flex flex-col min-h-0 border border-border flex-1">
-              <CardHeader className="pb-2 pt-4 px-4">
-                <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4 text-amber-600" />
-                  Conflict List
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="flex-1 min-h-0 px-4 pb-4 overflow-auto">
-                <ConflictList
-                  severityFilter={severityFilter}
-                  onSeverityFilterChange={setSeverityFilter}
-                  onResolve={handleResolve}
-                  localConflicts={localConflicts}
-                  onConflictsChange={setLocalConflicts}
-                  onConflictSelect={handleConflictSelect}
-                  onOpenWorkflow={handleOpenWorkflow}
-                />
-              </CardContent>
-            </Card>
-          </motion.div>
-        </div>
-
-        {/* Impact Panel — Desktop only (right side panel) */}
-        <AnimatePresence>
-          {selectedConflict && !isMobile && (
-            <motion.div
-              key="impact-panel"
-              initial={{ opacity: 0, x: 24, width: 0 }}
-              animate={{ opacity: 1, x: 0, width: 380 }}
-              exit={{ opacity: 0, x: 24, width: 0 }}
-              transition={{ duration: 0.25 }}
-              className="shrink-0 overflow-hidden border border-border rounded-lg bg-background shadow-md"
-            >
-              <ConflictImpactPanel conflict={selectedConflict} onClose={handleCloseImpactPanel} onOpenWorkflow={handleOpenWorkflow} />
-            </motion.div>
-          )}
-        </AnimatePresence>
       </div>
 
       {/* Conflict Resolution Workflow Dialog */}

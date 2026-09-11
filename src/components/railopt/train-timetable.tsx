@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Table,
   TableBody,
@@ -12,7 +12,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { trains, type SimTrain } from '@/data/simulated-data'
-import { TrainFront, Zap, Users, Package } from 'lucide-react'
+import { TrainFront, Zap, Users, Package, Crosshair, X } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { cn } from '@/lib/utils'
 
@@ -40,6 +40,10 @@ interface TrainTimetableProps {
   sectionFilter?: string
   typeFilter?: TrainTypeFilter
   onTypeFilterChange?: (filter: TrainTypeFilter) => void
+  /** Train number to highlight (deep link from the departure board) */
+  focusTrainNumber?: string | null
+  /** Clear the focus highlight */
+  onClearFocus?: () => void
 }
 
 const FILTER_OPTIONS: { value: TrainTypeFilter; label: string }[] = [
@@ -49,10 +53,11 @@ const FILTER_OPTIONS: { value: TrainTypeFilter; label: string }[] = [
   { value: 'goods', label: 'Freight' },
 ]
 
-export function TrainTimetable({ sectionFilter, typeFilter: externalTypeFilter, onTypeFilterChange }: TrainTimetableProps) {
+export function TrainTimetable({ sectionFilter, typeFilter: externalTypeFilter, onTypeFilterChange, focusTrainNumber, onClearFocus }: TrainTimetableProps) {
   const [internalTypeFilter, setInternalTypeFilter] = useState<TrainTypeFilter>('all')
   const typeFilter = externalTypeFilter ?? internalTypeFilter
   const setTypeFilter = onTypeFilterChange ?? setInternalTypeFilter
+  const tableWrapRef = useRef<HTMLDivElement>(null)
 
   const filteredTrains = useMemo(() => {
     return trains.filter((train) => {
@@ -60,6 +65,27 @@ export function TrainTimetable({ sectionFilter, typeFilter: externalTypeFilter, 
       return true
     })
   }, [typeFilter])
+
+  // Focus mode: guarantee the focused train is visible, then scroll it into view
+  useEffect(() => {
+    if (!focusTrainNumber) return
+    const train = trains.find((t) => t.number === focusTrainNumber)
+    if (!train) return
+    // Reset the type filter if it would hide the focused train
+    if (typeFilter !== 'all' && train.type !== typeFilter) {
+      setTypeFilter('all')
+      return
+    }
+    const t = setTimeout(() => {
+      const row = tableWrapRef.current?.querySelector<HTMLElement>(`[data-train-number="${focusTrainNumber}"]`)
+      row?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    }, 120)
+    return () => clearTimeout(t)
+  }, [focusTrainNumber, typeFilter, setTypeFilter])
+
+  const focused = focusTrainNumber
+    ? trains.find((t) => t.number === focusTrainNumber) ?? null
+    : null
 
   return (
     <div className="flex flex-col h-full">
@@ -89,8 +115,36 @@ export function TrainTimetable({ sectionFilter, typeFilter: externalTypeFilter, 
         </span>
       </div>
 
+      {/* Focus banner */}
+      {focused && (
+        <motion.div
+          initial={{ opacity: 0, y: -4 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex items-center gap-2 mb-2 rounded-md border border-[#FF9933]/50 bg-[#FF9933]/10 px-2.5 py-1.5"
+          role="status"
+          aria-label={`Focused on train ${focused.number} ${focused.name}`}
+        >
+          <Crosshair className="h-3.5 w-3.5 text-[#c2570b] dark:text-[#fdba74] shrink-0" aria-hidden="true" />
+          <p className="text-[11px] text-[#9a3412] dark:text-[#fdba74] truncate">
+            Focused: <span className="font-mono font-semibold">{focused.number}</span> {focused.name}
+            <span className="text-muted-foreground"> · {focused.departureTime} → {focused.arrivalTime}</span>
+          </p>
+          {onClearFocus && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="ml-auto h-5 w-5 p-0 text-muted-foreground hover:text-foreground shrink-0"
+              onClick={onClearFocus}
+              aria-label="Clear train focus"
+            >
+              <X className="h-3 w-3" />
+            </Button>
+          )}
+        </motion.div>
+      )}
+
       {/* Table */}
-      <div className="flex-1 min-h-0 overflow-auto rounded-md border border-border">
+      <div ref={tableWrapRef} className="flex-1 min-h-0 overflow-auto rounded-md border border-border">
         <Table>
           <TableHeader>
             <TableRow className="bg-muted/40 hover:bg-muted/40">
@@ -108,17 +162,38 @@ export function TrainTimetable({ sectionFilter, typeFilter: externalTypeFilter, 
             {filteredTrains.map((train, idx) => {
               const typeConf = TYPE_CONFIG[train.type]
               const TypeIcon = typeConf?.icon ?? TrainFront
+              const isFocused = train.number === focusTrainNumber
               return (
                 <motion.tr
                   key={train.id}
-                  className="hover:bg-muted/30 border-b border-border"
+                  data-train-number={train.number}
+                  className={cn(
+                    'border-b border-border transition-colors',
+                    isFocused
+                      ? 'bg-gradient-to-r from-[#FF9933]/15 via-[#FF9933]/8 to-transparent ring-2 ring-inset ring-[#FF9933]/70'
+                      : 'hover:bg-muted/30',
+                  )}
                   initial={{ opacity: 0, x: -8 }}
                   animate={{ opacity: 1, x: 0 }}
-                  transition={{ duration: 0.15, delay: idx * 0.03 }}
+                  transition={{ duration: 0.15, delay: isFocused ? 0 : idx * 0.03 }}
                   style={{ display: 'table-row' }}
                 >
-                  <TableCell className="text-xs font-mono font-medium py-2">{train.number}</TableCell>
-                  <TableCell className="text-xs font-medium py-2">{train.name}</TableCell>
+                  <TableCell className="text-xs font-mono font-medium py-2">
+                    <span className="inline-flex items-center gap-1">
+                      {train.number}
+                      {isFocused && <span className="h-1.5 w-1.5 rounded-full bg-[#FF9933] animate-pulse" aria-hidden="true" />}
+                    </span>
+                  </TableCell>
+                  <TableCell className="text-xs font-medium py-2">
+                    <span className="inline-flex items-center gap-1.5">
+                      {train.name}
+                      {isFocused && (
+                        <Badge className="text-[8px] px-1 py-0 h-3.5 bg-[#FF9933] text-white border-[#ea580c] uppercase tracking-wide">
+                          Focused
+                        </Badge>
+                      )}
+                    </span>
+                  </TableCell>
                   <TableCell className="py-2">
                     <Badge
                       variant="outline"

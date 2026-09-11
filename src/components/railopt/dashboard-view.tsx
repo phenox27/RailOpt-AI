@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { KpiCard } from './kpi-card'
 import { DepartmentChart } from './department-chart'
 import { CorridorChart } from './corridor-chart'
@@ -18,7 +18,7 @@ import { WeatherAlert } from './weather-alert'
 import { SectionComparisonChart } from './section-comparison-chart'
 import { CorridorHealthRing } from './corridor-health-ring'
 import { kpiData } from '@/data/simulated-data'
-import { useAppStore } from '@/store/app-store'
+import { useAppStore, NAV_ITEMS } from '@/store/app-store'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -86,7 +86,7 @@ const kpiCards = [
 ]
 
 export function DashboardView() {
-  const { currentRole, currentUserName, setActiveView } = useAppStore()
+  const { currentRole, currentUserName, setActiveView, pushDeepLink } = useAppStore()
   const [currentTime, setCurrentTime] = useState(new Date())
   const [activityExpanded, setActivityExpanded] = useState(false)
   const [railwayStatsExpanded, setRailwayStatsExpanded] = useState(false)
@@ -96,6 +96,22 @@ export function DashboardView() {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000)
     return () => clearInterval(timer)
   }, [])
+
+  // Departure-board row click → Timetable view focused on that train (role-gated)
+  const handleBoardTrainClick = useCallback((trainNumber: string, trainName: string) => {
+    const allowed = NAV_ITEMS.find((n) => n.id === 'timetable')?.roles.includes(currentRole)
+    if (!allowed) {
+      toast.error('Timetable view is not available for your role', {
+        description: 'Ask an Admin, Planner, or Control Office member to inspect this train',
+      })
+      return
+    }
+    pushDeepLink('train', trainNumber)
+    setActiveView('timetable')
+    toast.info(`Inspecting train ${trainNumber} ${trainName}`, {
+      description: 'Opened in Timetable & Conflicts with the row focused',
+    })
+  }, [currentRole, pushDeepLink, setActiveView])
 
   const greeting = (() => {
     const h = currentTime.getHours()
@@ -450,7 +466,7 @@ export function DashboardView() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.2, delay: 0.23 }}
       >
-        <NextDepartures variant="board" />
+        <NextDepartures variant="board" onTrainClick={handleBoardTrainClick} />
       </motion.div>
 
       <Separator />

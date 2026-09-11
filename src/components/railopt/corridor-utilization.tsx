@@ -1,11 +1,12 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import type { SimBlock } from '@/data/simulated-data'
 import { TRAIN_WINDOWS, computeTrainOverlaps } from '@/lib/train-conflicts'
 import { cn } from '@/lib/utils'
-import { Activity, AlertTriangle, Clock, Gauge, TrainFront } from 'lucide-react'
+import { Activity, AlertTriangle, Clock, Gauge, TrainFront, Layers } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { motion } from 'framer-motion'
 
 /** Live drag preview info pushed up from the timeline / gantt while dragging. */
@@ -126,7 +127,20 @@ function utilizationColor(minutes: number, overbooked: boolean): string {
  * removed and its proposed slot is drawn in, showing freed/reused capacity.
  */
 export function CorridorUtilization({ dayBlocks, preview, selectedBlock, onHourClick, dayLabel, selectedHour, className }: CorridorUtilizationProps) {
-  const buckets = useMemo(() => computeBuckets(dayBlocks, preview), [dayBlocks, preview])
+  // Per-section filter (carried-over suggestion) — options derived from the day's blocks.
+  // Derived (not synced): an unavailable selection silently falls back to "all".
+  const availableSections = useMemo(
+    () => Array.from(new Set(dayBlocks.map((b) => b.section))).sort(),
+    [dayBlocks],
+  )
+  const [sectionSelRaw, setSectionSel] = useState<string>('all')
+  const sectionSel = sectionSelRaw !== 'all' && availableSections.includes(sectionSelRaw) ? sectionSelRaw : 'all'
+  const scopedBlocks = useMemo(
+    () => (sectionSel === 'all' ? dayBlocks : dayBlocks.filter((b) => b.section === sectionSel)),
+    [dayBlocks, sectionSel],
+  )
+
+  const buckets = useMemo(() => computeBuckets(scopedBlocks, preview), [scopedBlocks, preview])
   const freeWindow = useMemo(() => findLongestFreeWindow(buckets), [buckets])
 
   // Train-path cross-check for the selected block's window (hidden while dragging)
@@ -148,6 +162,7 @@ export function CorridorUtilization({ dayBlocks, preview, selectedBlock, onHourC
   const previewConflicted = !!preview && (preview.conflictCount > 0 || preview.trainNumbers.length > 0)
   const previewLeftPct = preview ? (preview.startH / TOTAL_HOURS) * 100 : 0
   const previewWidthPct = preview ? (preview.durationH / TOTAL_HOURS) * 100 : 0
+  const isSectionScoped = sectionSel !== 'all'
 
   // Train path strips (corridor timetable)
   const trainSpans = useMemo(() => TRAIN_WINDOWS.map((w) => ({
@@ -184,10 +199,42 @@ export function CorridorUtilization({ dayBlocks, preview, selectedBlock, onHourC
                 {dayLabel}
               </span>
             )}
-            <span className="text-[9px] text-muted-foreground font-mono">24h · 1h buckets</span>
+            {availableSections.length > 1 ? (
+              <Select value={sectionSel} onValueChange={setSectionSel}>
+                <SelectTrigger
+                  className={cn(
+                    'h-5 text-[9px] w-[132px] gap-1 px-1.5 rounded font-semibold',
+                    isSectionScoped && 'border-[#138808]/50 text-[#138808] dark:text-emerald-400 bg-emerald-500/5',
+                  )}
+                  aria-label="Filter utilization chart by section"
+                >
+                  <Layers className="h-2.5 w-2.5 shrink-0 opacity-60" aria-hidden="true" />
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all" className="text-[10px]">
+                    All sections ({dayBlocks.length})
+                  </SelectItem>
+                  {availableSections.map((s) => (
+                    <SelectItem key={s} value={s} className="text-[10px]">
+                      {s} ({dayBlocks.filter((b) => b.section === s).length})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <span className="text-[9px] text-muted-foreground font-mono">24h · 1h buckets</span>
+            )}
           </span>
         )}
       </div>
+
+      {/* Scoped note when a single section is selected */}
+      {isSectionScoped && (
+        <p className="text-[8px] text-muted-foreground -mt-1 mb-1.5" role="note">
+          Chart scoped to <span className="font-semibold text-foreground/80">{sectionSel}</span> — {scopedBlocks.length} block{scopedBlocks.length !== 1 ? 's' : ''} on this day
+        </p>
+      )}
 
       {/* Chart */}
       <div className="relative" role="img" aria-label={`Corridor utilization for the day: peak ${peakPct} percent, ${totalHours} block hours booked`}>
