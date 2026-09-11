@@ -128,3 +128,43 @@ model AuditLog {
   request MaintenanceRequest? @relation(fields: [requestId], references: [id])
   user    User?              @relation(fields: [userId], references: [id])
 }
+
+// User-created plans from the Plans view wizard.
+// Dates are stored as ISO yyyy-MM-dd strings to match the frontend shape.
+// blockIds / arrays stored as JSON strings (SQLite has no list primitives).
+model CustomPlan {
+  id        String   @id @default(cuid())
+  name      String
+  type      String   @default("weekly")
+  startDate String
+  endDate   String
+  status    String   @default("draft")
+  version   Int      @default(1)
+  createdBy String
+  notes     String?
+  blockIds  String   @default("[]")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Manual blocks created in the Planning view, optionally linked to a CustomPlan.
+model ManualBlock {
+  id                String  @id @default(cuid())
+  name              String
+  section           String
+  stationFrom       String?
+  stationTo         String?
+  startTime         String
+  endTime           String
+  duration          Int
+  department        String
+  status            String  @default("edited")
+  planId            String?
+  line              String  @default("both")
+  isAiRecommended   Boolean @default(false)
+  aiConfidence      Float?
+  aiReasoning       String?
+  maintenanceReqIds String  @default("[]")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}

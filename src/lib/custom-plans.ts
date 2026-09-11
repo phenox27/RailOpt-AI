@@ -77,3 +77,105 @@ export function persistManualBlocks(list: ManualBlock[]) {
     // storage unavailable — blocks stay in memory for this session
   }
 }
+
+/**
+ * Server sync (Prisma + SQLite). localStorage remains the instant cache /
+ * offline fallback; the DB is the durable source of truth shared across
+ * browsers. All helpers fail soft (return false / []) so the demo keeps
+ * working when the API is unavailable.
+ */
+
+// ---- Custom plans ----
+
+export async function fetchServerCustomPlans(): Promise<CustomPlan[]> {
+  try {
+    const res = await fetch('/api/custom-plans', { cache: 'no-store' })
+    if (!res.ok) return []
+    const json = await res.json()
+    return Array.isArray(json?.data) ? (json.data as CustomPlan[]) : []
+  } catch {
+    return []
+  }
+}
+
+export async function createServerCustomPlan(plan: CustomPlan): Promise<boolean> {
+  try {
+    const res = await fetch('/api/custom-plans', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(plan),
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
+export async function deleteServerCustomPlan(id: string): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/custom-plans/${encodeURIComponent(id)}`, { method: 'DELETE' })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
+export async function linkServerCustomPlanBlock(planId: string, blockId: string): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/custom-plans/${encodeURIComponent(planId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ addBlockId: blockId }),
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
+/** Push localStorage-only plans to the DB (id-diffed; POSTs only missing) and return the merged list. */
+export async function migrateLocalCustomPlans(local: CustomPlan[]): Promise<CustomPlan[]> {
+  const server = await fetchServerCustomPlans()
+  const serverIds = new Set(server.map((p) => p.id))
+  const missing = local.filter((p) => !serverIds.has(p.id))
+  if (missing.length === 0) return server
+  const results = await Promise.all(missing.map((p) => createServerCustomPlan(p)))
+  const failed = missing.filter((_, i) => !results[i])
+  return [...server, ...failed]
+}
+
+// ---- Manual blocks ----
+
+export async function fetchServerManualBlocks(): Promise<ManualBlock[]> {
+  try {
+    const res = await fetch('/api/manual-blocks', { cache: 'no-store' })
+    if (!res.ok) return []
+    const json = await res.json()
+    return Array.isArray(json?.data) ? (json.data as ManualBlock[]) : []
+  } catch {
+    return []
+  }
+}
+
+export async function createServerManualBlock(block: ManualBlock): Promise<boolean> {
+  try {
+    const res = await fetch('/api/manual-blocks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(block),
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
+export async function migrateLocalManualBlocks(local: ManualBlock[]): Promise<ManualBlock[]> {
+  const server = await fetchServerManualBlocks()
+  const serverIds = new Set(server.map((b) => b.id))
+  const missing = local.filter((b) => !serverIds.has(b.id))
+  if (missing.length === 0) return server
+  const results = await Promise.all(missing.map((b) => createServerManualBlock(b)))
+  const failed = missing.filter((_, i) => !results[i])
+  return [...server, ...failed]
+}

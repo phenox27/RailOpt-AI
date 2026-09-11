@@ -24,7 +24,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { useAppStore } from '@/store/app-store'
 import { useDeepLink } from '@/hooks/use-deep-link'
-import { FileText, Calendar, CalendarClock, GitBranch, Clock, CheckCircle2, AlertCircle, ChevronRight, Download, Share2, Printer, FileDown, GitCompare, Trophy, Sparkles, ShieldAlert, Plus, Trash2, CalendarPlus, Boxes, Gauge, Bot } from 'lucide-react'
+import { FileText, Calendar, CalendarClock, GitBranch, Clock, CheckCircle2, AlertCircle, ChevronRight, Download, Share2, Printer, FileDown, GitCompare, Trophy, Sparkles, ShieldAlert, Plus, Trash2, CalendarPlus, Boxes, Gauge, Bot, Database, HardDrive, Loader2 } from 'lucide-react'
 import { PrintHeader } from './print-header'
 import { EmptyState } from './empty-state'
 import { toast } from 'sonner'
@@ -33,7 +33,7 @@ import { useIsMobile } from '@/hooks/use-mobile'
 
 // Custom plans created by the user (persisted to localStorage)
 // Shared with Planning view via @/lib/custom-plans
-import { loadCustomPlans, persistCustomPlans, loadManualBlocks, type CustomPlan, type ManualBlock } from '@/lib/custom-plans'
+import { loadCustomPlans, persistCustomPlans, loadManualBlocks, persistManualBlocks, migrateLocalCustomPlans, migrateLocalManualBlocks, createServerCustomPlan, deleteServerCustomPlan, type CustomPlan, type ManualBlock } from '@/lib/custom-plans'
 
 const statusColors: Record<string, string> = {
   draft: 'bg-muted text-muted-foreground',
@@ -348,20 +348,37 @@ export function PlansView() {
   const [newPlanEnd, setNewPlanEnd] = useState('')
   const [newPlanNotes, setNewPlanNotes] = useState('')
   const [deletePlanId, setDeletePlanId] = useState<string | null>(null)
+  // Server sync state: null = unknown, true = DB-backed, false = device-only
+  const [serverSynced, setServerSynced] = useState<boolean | null>(null)
 
-  // Load persisted custom plans on mount (async hydration to avoid render cascade)
+  // Hydrate from server (source of truth) with one-time localStorage migration.
+  // localStorage provides the instant cache; DB makes plans durable across browsers.
   useEffect(() => {
-    const t = setTimeout(() => {
-      const persisted = loadCustomPlans()
-      if (persisted.length > 0) {
-        setCustomPlans(persisted)
-      }
-      const persistedManual = loadManualBlocks()
-      if (persistedManual.length > 0) {
-        setManualBlocks(persistedManual)
+    let cancelled = false
+    const t = setTimeout(async () => {
+      try {
+        const [mergedPlans, mergedBlocks] = await Promise.all([
+          migrateLocalCustomPlans(loadCustomPlans()),
+          migrateLocalManualBlocks(loadManualBlocks()),
+        ])
+        if (cancelled) return
+        if (mergedPlans.length > 0) {
+          setCustomPlans(mergedPlans)
+          persistCustomPlans(mergedPlans)
+        }
+        if (mergedBlocks.length > 0) {
+          setManualBlocks(mergedBlocks)
+          persistManualBlocks(mergedBlocks)
+        }
+        setServerSynced(true)
+      } catch {
+        if (!cancelled) setServerSynced(false)
       }
     }, 0)
-    return () => clearTimeout(t)
+    return () => {
+      cancelled = true
+      clearTimeout(t)
+    }
   }, [])
 
   // Deep links from command palette (expand plan / open create wizard)
@@ -425,6 +442,10 @@ export function PlansView() {
     const next = [plan, ...customPlans]
     setCustomPlans(next)
     persistCustomPlans(next)
+    // Write-through to the server (non-blocking; localStorage already updated)
+    void createServerCustomPlan(plan).then((ok) => {
+      if (ok) setServerSynced(true)
+    })
     setCreateOpen(false)
     setNewPlanName('')
     setNewPlanStart('')
@@ -442,6 +463,8 @@ export function PlansView() {
     const next = customPlans.filter((p) => p.id !== deletePlanId)
     setCustomPlans(next)
     persistCustomPlans(next)
+    // Write-through deletion to the server
+    void deleteServerCustomPlan(deletePlanId)
     if (expandedPlanId === deletePlanId) setExpandedPlanId(null)
     setDeletePlanId(null)
     if (target) {
@@ -527,13 +550,15 @@ export function PlansView() {
         className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3"
       >
         {([
-          { icon: FileText, label: 'Plans', value: String(stats.plans), tint: 'text-[#0d47a1] dark:text-[#9fa8da]', ring: 'border-[#9fa8da]/40' },
-          { icon: Boxes, label: 'Blocks Planned', value: String(stats.blocks), tint: 'text-violet-600 dark:text-violet-400', ring: 'border-violet-300/40' },
-          { icon: Clock, label: 'Engineer Hours', value: `${stats.hours}h`, tint: 'text-amber-600 dark:text-amber-400', ring: 'border-amber-300/40' },
-          { icon: Bot, label: 'AI Recommended', value: `${stats.aiPct}%`, tint: 'text-emerald-600 dark:text-emerald-400', ring: 'border-emerald-300/40' },
+          { icon: FileText, label: 'Plans', value: String(stats.plans), tint: 'text-[#0d47a1] dark:text-[#9fa8da]', ring: 'border-[#9fa8da]/40', bar: 'bg-gradient-to-r from-[#1a237e] to-[#5c6bc0]' },
+          { icon: Boxes, label: 'Blocks Planned', value: String(stats.blocks), tint: 'text-violet-600 dark:text-violet-400', ring: 'border-violet-300/40', bar: 'bg-gradient-to-r from-violet-500 to-fuchsia-400' },
+          { icon: Clock, label: 'Engineer Hours', value: `${stats.hours}h`, tint: 'text-amber-600 dark:text-amber-400', ring: 'border-amber-300/40', bar: 'bg-gradient-to-r from-amber-500 to-orange-400' },
+          { icon: Bot, label: 'AI Recommended', value: `${stats.aiPct}%`, tint: 'text-emerald-600 dark:text-emerald-400', ring: 'border-emerald-300/40', bar: 'bg-gradient-to-r from-emerald-500 to-teal-400' },
         ] as const).map((s) => (
-          <div key={s.label} className={`flex items-center gap-2.5 rounded-xl border ${s.ring} bg-card/60 px-3 py-2.5 shadow-sm`}>
-            <div className={`flex items-center justify-center w-8 h-8 rounded-lg bg-muted/60 shrink-0`}>
+          <div key={s.label} className={`group relative overflow-hidden flex items-center gap-2.5 rounded-xl border ${s.ring} bg-card/60 px-3 py-2.5 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md`}>
+            {/* Accent bar that brightens on hover */}
+            <span className={`absolute inset-x-0 top-0 h-[3px] ${s.bar} opacity-60 group-hover:opacity-100 transition-opacity`} aria-hidden="true" />
+            <div className={`flex items-center justify-center w-8 h-8 rounded-lg bg-muted/60 shrink-0 transition-transform duration-200 group-hover:scale-105`}>
               <s.icon className={`h-4 w-4 ${s.tint}`} />
             </div>
             <div className="min-w-0">
@@ -543,6 +568,32 @@ export function PlansView() {
           </div>
         ))}
       </motion.div>
+
+      {/* Server sync indicator */}
+      <div className="flex items-center gap-1.5 px-1 -mt-1" aria-live="polite">
+        {serverSynced === true && (
+          <>
+            <Database className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
+            <span className="text-[10px] text-muted-foreground">
+              Cloud-synced — custom plans & manual blocks saved to the server, available on any browser
+            </span>
+          </>
+        )}
+        {serverSynced === false && (
+          <>
+            <HardDrive className="h-3 w-3 text-amber-600 dark:text-amber-400" />
+            <span className="text-[10px] text-muted-foreground">
+              Saved on this device only (server unavailable)
+            </span>
+          </>
+        )}
+        {serverSynced === null && (
+          <>
+            <Loader2 className="h-3 w-3 text-muted-foreground/50 animate-spin" />
+            <span className="text-[10px] text-muted-foreground/60">Checking server sync…</span>
+          </>
+        )}
+      </div>
 
       {/* Comparison Table (shown when compare mode is on) */}
       <AnimatePresence>
@@ -578,7 +629,7 @@ export function PlansView() {
           const optimizedAt = lastOptimized[plan.id]
 
           return (
-            <Card key={plan.id} className={`overflow-hidden print-keep print-card transition-all duration-200 hover:shadow-md hover:-translate-y-0.5 ${planIdx > 0 ? 'print-break-before' : ''}`} data-card>
+            <Card key={plan.id} className={`overflow-hidden print-keep print-card transition-all duration-200 hover:shadow-md hover:-translate-y-0.5 ${isCustomPlan ? 'border-l-4 border-l-[#FF9933]/70 dark:border-l-[#FF9933]/50' : ''} ${planIdx > 0 ? 'print-break-before' : ''}`} data-card>
               <CardHeader className="pb-3">
                 <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2">
                   <div className="flex items-center gap-3">

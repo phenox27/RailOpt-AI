@@ -2062,3 +2062,49 @@ Stage Summary:
 - All buttons remain functional; team names untouched (Dhittika, Jeet, Diya, Debarshi, Rupam, Alivia only)
 - Unresolved/risks: (1) dev server OOM under heavy parallel edit+compile+browser load — keep edits incremental; (2) manual blocks are per-browser localStorage (not DB) — same caveat as custom plans; (3) planning custom-plan selection resets when switching views (component state); (4) exports of custom plans include manual blocks but not their AI metadata (empty by design)
 - Next round suggestions: (1) DB persistence via Prisma for custom plans + manual blocks + invited users; (2) per-role landing view after login (control office → timetable, engineering → maintenance); (3) drag-and-drop block rescheduling on the timeline; (4) printable corridor summary PDF per custom plan
+
+---
+Task ID: cron-review-3
+Agent: main (Z.ai Code, webDevReview cron)
+Task: QA pass + DB persistence via Prisma for custom plans/manual blocks + per-role landing views + Plans styling polish
+
+Work Log:
+- QA baseline: all views stable, zero console errors (fresh profile), server 200. Fresh browser profile had EMPTY localStorage — confirming last round's top risk (per-browser data loss) → chose DB persistence as this round's focus.
+
+- NEW FEATURE A — Durable server persistence (Prisma + SQLite):
+  * Schema: added CustomPlan (name/type/startDate/endDate/status/version/createdBy/notes/blockIds-as-JSON-string) + ManualBlock (full block shape, planId link, maintenanceReqIds-as-JSON-string) — pushed via bun run db:push
+  * API routes (all behind requireAuth + requireRole(['admin','planner'])):
+    - GET/POST /api/custom-plans (POST validates name/dates, end>=start; accepts client id so frontend links stay consistent)
+    - PATCH/DELETE /api/custom-plans/[id] (PATCH: addBlockId/removeBlockId/blockIds/name/notes/status/dates; DELETE: removes plan + unlinks its manual blocks via updateMany)
+    - GET/POST /api/manual-blocks (POST also best-effort syncs the linked plan's blockIds server-side)
+    - DELETE /api/manual-blocks/[id] (unlinks from plan)
+  * src/lib/custom-plans.ts extended with fail-soft server helpers: fetchServer*/createServer*/deleteServer*/linkServer*, and id-diffed migrateLocal* (fetch first, POST only missing ids — fixed noisy duplicate POST 500s from earlier naive version)
+  * Frontend write-through (both views): localStorage update stays instant+optimistic; API call fires non-blocking (void); DB is source of truth on next hydrate
+  * plans-view hydration: migrateLocalCustomPlans + migrateLocalManualBlocks (server merge, localStorage = cache/fallback); same in planning-view
+  * NEW sync indicator under Plans stats: 3 states — "Cloud-synced — saved to the server, available on any browser" (green DB icon) / "Saved on this device only" (amber) / "Checking server sync…" (spinner), aria-live=polite
+
+- NEW FEATURE B — Per-role landing view after login:
+  * app-store: ROLE_HOME_VIEW map (admin→dashboard, planner→planning, control_office→timetable, engineering/snt/traction→maintenance)
+  * setUserFromSession picks landing = last visited view (sessionStorage 'railopt-last-view') if still allowed for the role, else role home; setActiveView persists to sessionStorage; clearUser removes it
+  * VERIFIED: Jeet signs in → lands on Planning; Debarshi → Maintenance Requests; role-restricted nav respected (Jeet has no Audit/Settings)
+
+- STYLING POLISH:
+  * Plans stat cards: gradient top accent bars per metric (navy/violet→fuchsia/amber→orange/emerald→teal), hover lift + shadow + icon scale, group-hover brightening
+  * Custom plan cards: saffron left border accent (border-l-4 #FF9933/70, dark variant) to distinguish from standard plans
+  * Dark mode verified for all new elements (accent bars, indicator, saffron border — contrast good)
+
+Verification Results (agent-browser + direct DB):
+- Created "DB Persistence Test" as Jeet → POST 201 → row in SQLite (createdBy "Jeet")
+- **Acid test**: wiped localStorage+sessionStorage → reload → plan still listed (fetched from DB), stats updated
+- Open in Planning → added manual block → manualBlock row + plan.blockIds updated SERVER-SIDE (PATCH verified)
+- Deleted via UI "Delete Plan" → DELETE hit → DB empty (note: earlier "failed" delete was my test harness clicking wrong button text — app was fine)
+- Migration: id-diffed, no more duplicate 500s; log shows clean GET/POST/PATCH/DELETE flows, 0 recent 500s
+- Per-role landing: Jeet→Planning ✓, Debarshi→Maintenance ✓
+- Lint: 0 errors; fresh console: 0 errors/warnings
+- All 6 team demo accounts present on auth form with exact names (Dhittika/Jeet/Diya/Debarshi/Rupam/Alivia)
+
+Stage Summary:
+- Custom plans + manual blocks are now durable and cross-browser/cross-user (DB-backed) with localStorage as instant cache + offline fallback + auto-migration; visible sync status indicator
+- Role-aware landing makes the team demo feel purpose-built (each member lands where they work)
+- Unresolved/risks: (1) OOM killed the dev server 3× this round (heavy Chrome+compile) — restart procedure works but keep sessions lean; (2) auth-guard requires login for these APIs — offline demo mode (isOffline flag) does not bypass, acceptable; (3) migration is id-diffed but does not reconcile field-level edits of the same plan id (last-write-wins localStorage vs DB) — acceptable for demo
+- Next round suggestions: (1) invited-users persistence via Prisma User model (create endpoint + settings-view write-through); (2) audit-log entries for custom-plan create/delete (action=CUSTOM_PLAN_CREATED etc.) to enrich the Audit view; (3) drag-and-drop block rescheduling on the Planning timeline; (4) PDF export of a custom plan (server-side or print CSS already exists — add a dedicated print layout)

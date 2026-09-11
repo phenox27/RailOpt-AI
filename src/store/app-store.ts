@@ -38,6 +38,18 @@ export const NAV_ITEMS: NavItem[] = [
   { id: 'settings', label: 'Settings', icon: 'Settings', roles: ['admin'] },
 ]
 
+/** Where each role lands right after signing in. */
+export const ROLE_HOME_VIEW: Record<Role, ViewId> = {
+  admin: 'dashboard',
+  planner: 'planning',
+  control_office: 'timetable',
+  engineering: 'maintenance',
+  snt: 'maintenance',
+  traction: 'maintenance',
+}
+
+const LAST_VIEW_KEY = 'railopt-last-view'
+
 interface SessionUser {
   role: Role
   name: string
@@ -87,7 +99,15 @@ interface AppState {
 
 export const useAppStore = create<AppState>((set) => ({
   activeView: 'dashboard',
-  setActiveView: (view) => set({ activeView: view }),
+  setActiveView: (view) => {
+    set({ activeView: view })
+    // Remember the view for soft-refresh restoration (per-tab, cleared on logout)
+    try {
+      sessionStorage.setItem(LAST_VIEW_KEY, view)
+    } catch {
+      /* storage unavailable */
+    }
+  },
   
   currentRole: 'planner',
   setCurrentRole: (role) => set({ currentRole: role }),
@@ -97,23 +117,45 @@ export const useAppStore = create<AppState>((set) => ({
   currentUserDepartment: 'Operating',
   isSessionActive: true,
   lastLoginTime: new Date().toISOString(),
-  setUserFromSession: (user) => set({
-    currentRole: user.role,
-    currentUserName: user.name,
-    currentUserEmail: user.email,
-    currentUserId: user.id,
-    isSessionActive: true,
-    lastLoginTime: new Date().toISOString(),
-  }),
-  clearUser: () => set({
-    currentRole: 'planner',
-    currentUserName: '',
-    currentUserEmail: '',
-    currentUserId: '',
-    currentUserDepartment: '',
-    isSessionActive: false,
-    lastLoginTime: null,
-  }),
+  setUserFromSession: (user) => {
+    // Per-role landing view: restore the last visited view when it is still
+    // allowed for this role, otherwise fall back to the role's home view.
+    let landing: ViewId = ROLE_HOME_VIEW[user.role] ?? 'dashboard'
+    try {
+      const last = sessionStorage.getItem(LAST_VIEW_KEY) as ViewId | null
+      if (last) {
+        const item = NAV_ITEMS.find((n) => n.id === last)
+        if (item && item.roles.includes(user.role)) landing = last
+      }
+    } catch {
+      /* storage unavailable */
+    }
+    set({
+      currentRole: user.role,
+      currentUserName: user.name,
+      currentUserEmail: user.email,
+      currentUserId: user.id,
+      isSessionActive: true,
+      lastLoginTime: new Date().toISOString(),
+      activeView: landing,
+    })
+  },
+  clearUser: () => {
+    try {
+      sessionStorage.removeItem(LAST_VIEW_KEY)
+    } catch {
+      /* storage unavailable */
+    }
+    set({
+      currentRole: 'planner',
+      currentUserName: '',
+      currentUserEmail: '',
+      currentUserId: '',
+      currentUserDepartment: '',
+      isSessionActive: false,
+      lastLoginTime: null,
+    })
+  },
   
   isOffline: false,
   setOffline: (offline) => set({ isOffline: offline }),

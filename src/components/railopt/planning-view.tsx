@@ -3,7 +3,7 @@
 import { useState, useCallback, useMemo, useEffect } from 'react'
 import { plans, blocks, conflicts, maintenanceRequests, corridors, type SimBlock, type SimPlan } from '@/data/simulated-data'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { loadCustomPlans, addBlockToCustomPlan, loadManualBlocks, persistManualBlocks, type CustomPlan } from '@/lib/custom-plans'
+import { loadCustomPlans, addBlockToCustomPlan, loadManualBlocks, persistManualBlocks, migrateLocalCustomPlans, migrateLocalManualBlocks, createServerManualBlock, linkServerCustomPlanBlock, type CustomPlan } from '@/lib/custom-plans'
 import { useAppStore } from '@/store/app-store'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -99,15 +99,29 @@ export function PlanningView() {
   const [customBlocks, setCustomBlocks] = useState<SimBlock[]>([])
   const isMobile = useIsMobile()
 
-  // Hydrate persisted manual blocks + custom plans (async to avoid render cascade)
+  // Hydrate from server (source of truth) with one-time localStorage migration
   useEffect(() => {
-    const t = setTimeout(() => {
-      const persistedBlocks = loadManualBlocks()
-      if (persistedBlocks.length > 0) setCustomBlocks(persistedBlocks)
-      const persistedPlans = loadCustomPlans()
-      if (persistedPlans.length > 0) setCustomPlans(persistedPlans)
+    let cancelled = false
+    const t = setTimeout(async () => {
+      try {
+        const [mergedBlocks, mergedPlans] = await Promise.all([
+          migrateLocalManualBlocks(loadManualBlocks()),
+          migrateLocalCustomPlans(loadCustomPlans()),
+        ])
+        if (cancelled) return
+        if (mergedBlocks.length > 0) {
+          setCustomBlocks(mergedBlocks)
+          persistManualBlocks(mergedBlocks)
+        }
+        if (mergedPlans.length > 0) setCustomPlans(mergedPlans)
+      } catch {
+        // server unavailable — localStorage values (loaded above) remain
+      }
     }, 0)
-    return () => clearTimeout(t)
+    return () => {
+      cancelled = true
+      clearTimeout(t)
+    }
   }, [])
 
   // Consume "Open in Planning" requests from the Plans view
@@ -264,10 +278,13 @@ export function PlanningView() {
       persistManualBlocks(next as (SimBlock & { isManual: true })[])
       return next
     })
-    // Link the block to the active custom plan (persisted)
+    // Link the block to the active custom plan (persisted + server)
     if (isCustomPlanActive) {
       setCustomPlans(addBlockToCustomPlan(activePlan.id, newBlock.id))
+      void linkServerCustomPlanBlock(activePlan.id, newBlock.id)
     }
+    // Write-through to the server (non-blocking)
+    void createServerManualBlock(newBlock as (SimBlock & { isManual: true }))
     toast.success(`Block "${data.name}" added to the plan`, {
       description: `${data.section} · ${durationMin} min · ${format(parseISO(startISO), 'MMM d, HH:mm')}`,
     })
