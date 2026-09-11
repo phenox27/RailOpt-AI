@@ -1,0 +1,624 @@
+     1→     1→'use client'
+     2→     2→
+     3→     3→import { useState, useCallback, useMemo } from 'react'
+     4→     4→import { plans, blocks, conflicts, maintenanceRequests, corridors, type SimBlock } from '@/data/simulated-data'
+     5→     5→import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+     6→     6→import { Badge } from '@/components/ui/badge'
+     7→     7→import { Button } from '@/components/ui/button'
+     8→     8→import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+     9→     9→import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+    10→    10→import { Separator } from '@/components/ui/separator'
+    11→    11→import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+    12→    12→import { BlockTimeline } from './block-timeline'
+    13→    13→import { AiRecommendationPanel } from './ai-recommendation-panel'
+    14→    14→import { BlockDetailPanel } from './block-detail-panel'
+    15→    15→import { OptimizationProgress } from './optimization-progress'
+    16→    16→import { ManualBlockForm } from './manual-block-form'
+    17→    17→import { TrackGeometryPanel } from './track-geometry-panel'
+    18→    18→import { GanttView } from './gantt-view'
+    19→    19→import { CrewSchedulingPanel } from './crew-scheduling-panel'
+    20→    20→import { BlockDurationOptimizer } from './block-duration-optimizer'
+    21→    21→import {
+    22→    22→  Sparkles,
+    23→    23→  Plus,
+    24→    24→  CalendarClock,
+    25→    25→  AlertTriangle,
+    26→    26→  Blocks,
+    27→    27→  CheckCircle2,
+    28→    28→  ChevronLeft,
+    29→    29→  ChevronRight,
+    30→    30→  Filter,
+    31→    31→  Bot,
+    32→    32→  Info,
+    33→    33→  Clock,
+    34→    34→  Users,
+    35→    35→  Zap,
+    36→    36→  X,
+    37→    37→  Printer,
+    38→    38→  Gauge,
+    39→    39→  ChevronDown,
+    40→    40→  ChevronUp,
+    41→    41→  GanttChart,
+    42→    42→  List,
+    43→    43→  HardHat,
+    44→    44→  Brain,
+    45→    45→} from 'lucide-react'
+    46→    46→import { cn } from '@/lib/utils'
+    47→    47→import { format, parseISO, addDays, subDays, isToday } from 'date-fns'
+    48→    48→import { motion } from 'framer-motion'
+    49→    49→import { useIsMobile } from '@/hooks/use-mobile'
+    50→    50→import { PrintHeader } from './print-header'
+    51→    51→import { toast } from 'sonner'
+    52→    52→
+    53→    53→// Plan status badge
+    54→    54→const PLAN_STATUS_CONFIG: Record<string, { label: string; className: string }> = {
+    55→    55→  draft: { label: 'Draft', className: 'bg-muted text-foreground/80 border-border' },
+    56→    56→  optimizing: { label: 'Optimizing', className: 'bg-[#e8eaf6] text-[#0d47a1] border-[#9fa8da]' },
+    57→    57→  recommended: { label: 'Recommended', className: 'bg-[#e8eaf6] text-[#0d47a1] border-[#9fa8da]' },
+    58→    58→  reviewed: { label: 'Reviewed', className: 'bg-blue-50 text-blue-700 border-blue-200' },
+    59→    59→  verified: { label: 'Verified', className: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+    60→    60→  finalized: { label: 'Finalized', className: 'bg-violet-50 text-violet-700 border-violet-200' },
+    61→    61→  approved: { label: 'Approved', className: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+    62→    62→}
+    63→    63→
+    64→    64→export function PlanningView() {
+    65→    65→  const [planTab, setPlanTab] = useState<'weekly' | 'monthly'>('weekly')
+    66→    66→  const activePlan = plans.find((p) => p.type === planTab) || plans[0]
+    67→    67→  const planStart = parseISO(activePlan.startDate)
+    68→    68→  const [selectedDate, setSelectedDate] = useState(activePlan.startDate)
+    69→    69→  const [sectionFilter, setSectionFilter] = useState<string>('all')
+    70→    70→  const [deptFilter, setDeptFilter] = useState<string>('all')
+    71→    71→  const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null)
+    72→    72→  const [isOptimizing, setIsOptimizing] = useState(false)
+    73→    73→  const [optimizationDone, setOptimizationDone] = useState(false)
+    74→    74→  const [manualFormOpen, setManualFormOpen] = useState(false)
+    75→    75→  const [detailSheetOpen, setDetailSheetOpen] = useState(false)
+    76→    76→  const [trackDataVisible, setTrackDataVisible] = useState(false)
+    77→    77→  const [timelineMode, setTimelineMode] = useState<'timeline' | 'gantt' | 'crew'>('timeline')
+    78→    78→  const [optimizerVisible, setOptimizerVisible] = useState(false)
+    79→    79→  const [localBlockDurations, setLocalBlockDurations] = useState<Record<string, number>>({})
+    80→    80→  const [localBlockStatuses, setLocalBlockStatuses] = useState<Record<string, SimBlock['status']>>({})
+    81→    81→  const [customBlocks, setCustomBlocks] = useState<SimBlock[]>([])
+    82→    82→  const isMobile = useIsMobile()
+    83→    83→
+    84→    84→  // Merge simulated blocks with locally created blocks + apply local overrides
+    85→    85→  const allBlocks = useMemo(() => (
+    86→    86→    [...blocks, ...customBlocks].map((b) => ({
+    87→    87→      ...b,
+    88→    88→      duration: localBlockDurations[b.id] ?? b.duration,
+    89→    89→      status: localBlockStatuses[b.id] ?? b.status,
+    90→    90→    }))
+    91→    91→  ), [customBlocks, localBlockDurations, localBlockStatuses])
+    92→    92→
+    93→    93→  const rawSelectedBlock = allBlocks.find((b) => b.id === selectedBlockId) || null
+    94→    94→  const selectedBlock = rawSelectedBlock
+    95→    95→  const currentDate = parseISO(selectedDate)
+    96→    96→  const goPrevDay = () => {
+    97→    97→    const prev = subDays(currentDate, 1)
+    98→    98→    if (prev >= planStart) setSelectedDate(format(prev, 'yyyy-MM-dd'))
+    99→    99→  }
+   100→   100→  const goNextDay = () => {
+   101→   101→    const next = addDays(currentDate, 1)
+   102→   102→    const planEnd = parseISO(activePlan.endDate)
+   103→   103→    if (next <= planEnd) setSelectedDate(format(next, 'yyyy-MM-dd'))
+   104→   104→  }
+   105→   105→
+   106→   106→  const runOptimization = async () => {
+   107→   107→    setIsOptimizing(true)
+   108→   108→    setOptimizationDone(false)
+   109→   109→    try {
+   110→   110→      const res = await fetch('/api/optimization', {
+   111→   111→        method: 'POST',
+   112→   112→        headers: { 'Content-Type': 'application/json' },
+   113→   113→        body: JSON.stringify({ planId: activePlan.id, blockIds: activePlan.blockIds }),
+   114→   114→      })
+   115→   115→      if (!res.ok) throw new Error('Optimization failed')
+   116→   116→    } catch {
+   117→   117→      // Error handled in optimization progress
+   118→   118→    }
+   119→   119→  }
+   120→   120→
+   121→   121→  const onOptimizationComplete = useCallback(() => {
+   122→   122→    setIsOptimizing(false)
+   123→   123→    setOptimizationDone(true)
+   124→   124→  }, [])
+   125→   125→
+   126→   126→  const handleSelectBlock = (id: string | null) => {
+   127→   127→    setSelectedBlockId(id)
+   128→   128→    if (id && isMobile) {
+   129→   129→      setDetailSheetOpen(true)
+   130→   130→    }
+   131→   131→    if (!id) {
+   132→   132→      setOptimizerVisible(false)
+   133→   133→    }
+   134→   134→  }
+   135→   135→
+   136→   136→  const handleApplyDuration = (newDuration: number) => {
+   137→   137→    if (selectedBlockId) {
+   138→   138→      setLocalBlockDurations(prev => ({ ...prev, [selectedBlockId]: newDuration }))
+   139→   139→      setOptimizerVisible(false)
+   140→   140→      toast.success('Block duration updated')
+   141→   141→    }
+   142→   142→  }
+   143→   143→
+   144→   144→  const handleBlockStatusChange = (blockId: string, nextStatus: SimBlock['status']) => {
+   145→   145→    setLocalBlockStatuses(prev => ({ ...prev, [blockId]: nextStatus }))
+   146→   146→    const LABELS: Record<string, string> = {
+   147→   147→      edited: 'Block edited — submitted for verification',
+   148→   148→      verified: 'Block verified',
+   149→   149→      finalized: 'Block finalized — ready for approval',
+   150→   150→      approved: 'Block approved',
+   151→   151→      rejected: 'Block rejected',
+   152→   152→    }
+   153→   153→    if (nextStatus === 'rejected') {
+   154→   154→      toast.error('Block rejected and removed from the recommended workflow')
+   155→   155→    } else {
+   156→   156→      toast.success(LABELS[nextStatus] || `Block status updated to ${nextStatus}`)
+   157→   157→    }
+   158→   158→  }
+   159→   159→
+   160→   160→  const handleCreateManualBlock = (data: {
+   161→   161→    name: string
+   162→   162→    section: string
+   163→   163→    stationFrom: string
+   164→   164→    stationTo: string
+   165→   165→    startTime: string
+   166→   166→    endTime: string
+   167→   167→    department: string
+   168→   168→    line: string
+   169→   169→  }) => {
+   170→   170→    // startTime/endTime are "HH:mm" — combine with the selected planning date
+   171→   171→    const [sh, sm] = data.startTime.split(':').map(Number)
+   172→   172→    const [eh, em] = data.endTime.split(':').map(Number)
+   173→   173→    let durationMin = (eh * 60 + em) - (sh * 60 + sm)
+   174→   174→    if (durationMin <= 0) durationMin += 24 * 60 // handle overnight blocks
+   175→   175→    const startISO = `${selectedDate}T${data.startTime.padStart(5, '0')}:00`
+   176→   176→    const endISO = `${selectedDate}T${data.endTime.padStart(5, '0')}:00`
+   177→   177→    const newBlock: SimBlock = {
+   178→   178→      id: `custom-${Date.now()}`,
+   179→   179→      name: data.name,
+   180→   180→      section: data.section,
+   181→   181→      stationFrom: data.stationFrom,
+   182→   182→      stationTo: data.stationTo,
+   183→   183→      startTime: startISO,
+   184→   184→      endTime: endISO,
+   185→   185→      duration: durationMin,
+   186→   186→      department: data.department,
+   187→   187→      status: 'edited',
+   188→   188→      planId: activePlan.id,
+   189→   189→      line: (data.line as SimBlock['line']) || 'both',
+   190→   190→      isAiRecommended: false,
+   191→   191→      aiConfidence: 0,
+   192→   192→      aiReasoning: '',
+   193→   193→      maintenanceReqIds: [],
+   194→   194→    }
+   195→   195→    setCustomBlocks(prev => [...prev, newBlock])
+   196→   196→    toast.success(`Block "${data.name}" added to the plan`, {
+   197→   197→      description: `${data.section} · ${durationMin} min · ${format(parseISO(startISO), 'MMM d, HH:mm')}`,
+   198→   198→    })
+   199→   199→    handleSelectBlock(newBlock.id)
+   200→   200→  }
+   201→   201→
+   202→   202→  // Effective plan block ids — applies the section/department filters + manual blocks
+   203→   203→  const effectivePlanBlockIds = useMemo(() => {
+   204→   204→    let ids = activePlan.blockIds.filter((id) => {
+   205→   205→      const b = allBlocks.find((blk) => blk.id === id)
+   206→   206→      if (!b) return false
+   207→   207→      if (sectionFilter !== 'all' && b.section !== sectionFilter) return false
+   208→   208→      if (deptFilter !== 'all' && b.department !== deptFilter) return false
+   209→   209→      return true
+   210→   210→    })
+   211→   211→    // Manual blocks always included (they belong to this plan)
+   212→   212→    ids = [...ids, ...customBlocks.map((b) => b.id)]
+   213→   213→    return ids
+   214→   214→  }, [activePlan, allBlocks, sectionFilter, deptFilter, customBlocks])
+   215→   215→
+   216→   216→  const planBlocks = allBlocks.filter((b) => effectivePlanBlockIds.includes(b.id))
+   217→   217→  const totalBlocks = planBlocks.length
+   218→   218→  const aiRecommended = planBlocks.filter((b) => b.isAiRecommended).length
+   219→   219→  const planConflicts = conflicts.filter((c) => !c.resolved)
+   220→   220→  const criticalConflicts = planConflicts.filter((c) => c.severity === 'critical').length
+   221→   221→  const totalHours = planBlocks.reduce((sum, b) => sum + b.duration, 0) / 60
+   222→   222→  const departmentsInvolved = new Set(planBlocks.map((b) => b.department)).size
+   223→   223→
+   224→   224→  const dayLabels: { date: string; label: string; dayNum: number; hasBlocks: boolean; isToday: boolean }[] = []
+   225→   225→  const planEnd = parseISO(activePlan.endDate)
+   226→   226→  let d = planStart
+   227→   227→  while (d <= planEnd) {
+   228→   228→    const dateStr = format(d, 'yyyy-MM-dd')
+   229→   229→    const hasBlocks = planBlocks.some((b) => {
+   230→   230→      const bDate = new Date(b.startTime).toISOString().split('T')[0]
+   231→   231→      return bDate === dateStr
+   232→   232→    })
+   233→   233→    dayLabels.push({ date: dateStr, label: format(d, 'EEE'), dayNum: d.getDate(), hasBlocks, isToday: isToday(d) })
+   234→   234→    d = addDays(d, 1)
+   235→   235→  }
+   236→   236→
+   237→   237→  // Detail panel content
+   238→   238→  const detailContent = selectedBlock ? (
+   239→   239→    <div className="p-4 space-y-3">
+   240→   240→      {/* Duration Optimizer toggle */}
+   241→   241→      <div className="flex items-center gap-2">
+   242→   242→        <Button
+   243→   243→          variant={optimizerVisible ? 'default' : 'outline'}
+   244→   244→          size="sm"
+   245→   245→          className={cn(
+   246→   246→            'text-[10px] h-7 px-2.5 gap-1.5',
+   247→   247→            optimizerVisible ? 'bg-[#283593] hover:bg-[#0d47a1] text-white' : 'text-[#283593] border-[#9fa8da] hover:bg-[#e8eaf6] dark:text-[#3f51b5] dark:border-[#1a237e] dark:hover:bg-[#0d1442]/30',
+   248→   248→          )}
+   249→   249→          onClick={() => setOptimizerVisible(!optimizerVisible)}
+   250→   250→        >
+   251→   251→          <Brain className="w-3.5 h-3.5" />
+   252→   252→          Duration Optimizer
+   253→   253→        </Button>
+   254→   254→      </div>
+   255→   255→
+   256→   256→      {/* Duration Optimizer panel */}
+   257→   257→      {optimizerVisible && (
+   258→   258→        <BlockDurationOptimizer
+   259→   259→          blockId={selectedBlockId}
+   260→   260→          currentDuration={selectedBlock.duration}
+   261→   261→          onApply={handleApplyDuration}
+   262→   262→        />
+   263→   263→      )}
+   264→   264→
+   265→   265→      {selectedBlock.isAiRecommended ? (
+   266→   266→        <>
+   267→   267→          <AiRecommendationPanel
+   268→   268→            block={selectedBlock}
+   269→   269→            onAccept={() => { handleBlockStatusChange(selectedBlock.id, 'edited'); setSelectedBlockId(null); setDetailSheetOpen(false) }}
+   270→   270→            onEdit={() => setManualFormOpen(true)}
+   271→   271→            onReject={() => { handleBlockStatusChange(selectedBlock.id, 'rejected'); setSelectedBlockId(null); setDetailSheetOpen(false) }}
+   272→   272→          />
+   273→   273→          <BlockDetailPanel
+   274→   274→            block={selectedBlock}
+   275→   275→            onEdit={() => setManualFormOpen(true)}
+   276→   276→            onClose={() => { setSelectedBlockId(null); setDetailSheetOpen(false) }}
+   277→   277→            onReject={() => handleBlockStatusChange(selectedBlock.id, 'rejected')}
+   278→   278→            onAdvance={(next) => handleBlockStatusChange(selectedBlock.id, next)}
+   279→   279→          />
+   280→   280→        </>
+   281→   281→      ) : (
+   282→   282→        <BlockDetailPanel
+   283→   283→          block={selectedBlock}
+   284→   284→          onEdit={() => setManualFormOpen(true)}
+   285→   285→          onClose={() => { setSelectedBlockId(null); setDetailSheetOpen(false) }}
+   286→   286→          onReject={() => handleBlockStatusChange(selectedBlock.id, 'rejected')}
+   287→   287→          onAdvance={(next) => handleBlockStatusChange(selectedBlock.id, next)}
+   288→   288→        />
+   289→   289→      )}
+   290→   290→    </div>
+   291→   291→  ) : null
+   292→   292→
+   293→   293→  return (
+   294→   294→    <div className="flex flex-col h-full print-area">
+   295→   295→      {/* Print Header - hidden on screen, visible when printing */}
+   296→   296→      <PrintHeader
+   297→   297→        title="RailOpt AI — Block Planning Schedule"
+   298→   298→        corridor={corridors[0]?.name ?? 'Railway Corridor'}
+   299→   299→        planName={activePlan.name}
+   300→   300→      />
+   301→   301→
+   302→   302→      {/* Header */}
+   303→   303→      <div className="flex items-center justify-between gap-4 px-4 sm:px-6 pt-4 pb-2">
+   304→   304→        <div className="flex items-center gap-3">
+   305→   305→          <CalendarClock className="h-5 w-5 text-[#283593]" />
+   306→   306→          <h1 className="text-lg font-semibold text-foreground">Planning</h1>
+   307→   307→        </div>
+   308→   308→        <div className="flex items-center gap-2">
+   309→   309→          <Tabs value={planTab} onValueChange={(v) => setPlanTab(v as 'weekly' | 'monthly')}>
+   310→   310→            <TabsList className="h-8">
+   311→   311→              <TabsTrigger value="weekly" className="text-xs px-3 h-7">Weekly</TabsTrigger>
+   312→   312→              <TabsTrigger value="monthly" className="text-xs px-3 h-7">Monthly</TabsTrigger>
+   313→   313→            </TabsList>
+   314→   314→          </Tabs>
+   315→   315→          {/* Print Schedule button */}
+   316→   316→          <Button
+   317→   317→            variant="outline"
+   318→   318→            size="sm"
+   319→   319→            className="text-xs h-8 min-h-[44px] sm:h-8 gap-1.5"
+   320→   320→            onClick={() => window.print()}
+   321→   321→          >
+   322→   322→            <Printer className="h-3.5 w-3.5" />
+   323→   323→            <span className="hidden sm:inline">Print Schedule</span>
+   324→   324→            <span className="sm:hidden">Print</span>
+   325→   325→          </Button>
+   326→   326→        </div>
+   327→   327→      </div>
+   328→   328→
+   329→   329→      {/* Plan info strip */}
+   330→   330→      <div className="flex items-center gap-3 px-4 sm:px-6 pb-2 flex-wrap">
+   331→   331→        <span className="text-xs text-muted-foreground">{activePlan.name}</span>
+   332→   332→        <Badge variant="outline" className={cn('rounded-full text-[10px] px-2 py-0 h-5', PLAN_STATUS_CONFIG[activePlan.status]?.className || '')}>
+   333→   333→          {PLAN_STATUS_CONFIG[activePlan.status]?.label || activePlan.status}
+   334→   334→        </Badge>
+   335→   335→        <span className="text-xs text-muted-foreground">v{activePlan.version}</span>
+   336→   336→      </div>
+   337→   337→
+   338→   338→      {/* Filter bar - stacks on mobile */}
+   339→   339→      <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2 sm:gap-2 px-4 sm:px-6 pb-3 py-2 bg-muted/30 rounded-lg mx-4 sm:mx-6 border border-border/50">
+   340→   340→        <div className="flex items-center gap-2">
+   341→   341→          <Filter className="h-3.5 w-3.5 text-muted-foreground" />
+   342→   342→          <Select value={sectionFilter} onValueChange={setSectionFilter}>
+   343→   343→            <SelectTrigger size="sm" className="w-full sm:w-[140px] text-xs h-9 min-h-[44px] sm:h-8">
+   344→   344→              <SelectValue placeholder="Section" />
+   345→   345→            </SelectTrigger>
+   346→   346→            <SelectContent>
+   347→   347→              <SelectItem value="all">All Sections</SelectItem>
+   348→   348→              {corridors.map((c) => (
+   349→   349→                <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>
+   350→   350→              ))}
+   351→   351→            </SelectContent>
+   352→   352→          </Select>
+   353→   353→          <Select value={deptFilter} onValueChange={setDeptFilter}>
+   354→   354→            <SelectTrigger size="sm" className="w-full sm:w-[130px] text-xs h-9 min-h-[44px] sm:h-8">
+   355→   355→              <SelectValue placeholder="Department" />
+   356→   356→            </SelectTrigger>
+   357→   357→            <SelectContent>
+   358→   358→              <SelectItem value="all">All Departments</SelectItem>
+   359→   359→              <SelectItem value="engineering">Engineering</SelectItem>
+   360→   360→              <SelectItem value="snt">S&T</SelectItem>
+   361→   361→              <SelectItem value="traction">Traction</SelectItem>
+   362→   362→              <SelectItem value="combined">Combined</SelectItem>
+   363→   363→            </SelectContent>
+   364→   364→          </Select>
+   365→   365→        </div>
+   366→   366→
+   367→   367→        <div className="flex items-center gap-2 sm:ml-auto">
+   368→   368→          <Button
+   369→   369→            size="sm"
+   370→   370→            className={cn(
+   371→   371→              "bg-[#283593] hover:bg-[#0d47a1] text-white text-xs h-9 min-h-[44px] sm:h-8 gap-1.5 relative overflow-hidden",
+   372→   372→              !isOptimizing && "animate-[shimmer_2s_infinite]"
+   373→   373→            )}
+   374→   374→            onClick={runOptimization}
+   375→   375→            disabled={isOptimizing}
+   376→   376→          >
+   377→   377→            {!isOptimizing && (
+   378→   378→              <span className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent animate-[shimmer-sweep_2.5s_infinite]" />
+   379→   379→            )}
+   380→   380→            <Sparkles className="h-3.5 w-3.5" />
+   381→   381→            <span className="hidden sm:inline">Run AI Optimization</span>
+   382→   382→            <span className="sm:hidden">AI Optimize</span>
+   383→   383→          </Button>
+   384→   384→          <Button
+   385→   385→            variant="outline"
+   386→   386→            size="sm"
+   387→   387→            className="text-xs h-9 min-h-[44px] sm:h-8 gap-1.5"
+   388→   388→            onClick={() => setManualFormOpen(true)}
+   389→   389→          >
+   390→   390→            <Plus className="h-3.5 w-3.5" />
+   391→   391→            <span className="hidden sm:inline">Manual Add Block</span>
+   392→   392→            <span className="sm:hidden">Add Block</span>
+   393→   393→          </Button>
+   394→   394→        </div>
+   395→   395→      </div>
+   396→   396→
+   397→   397→      <Separator />
+   398→   398→
+   399→   399→      {/* Track Data - Collapsible section */}
+   400→   400→      <div className="px-4 sm:px-6 py-2">
+   401→   401→        <div className="flex items-center justify-between">
+   402→   402→          <div className="flex items-center gap-2 border-l-2 border-[#1a237e]/40 pl-2">
+   403→   403→            <Gauge className="h-4 w-4 text-[#283593] dark:text-[#3f51b5]" />
+   404→   404→            <h2 className="text-sm font-semibold">Track Data</h2>
+   405→   405→          </div>
+   406→   406→          <Button
+   407→   407→            variant="ghost"
+   408→   408→            size="sm"
+   409→   409→            className="h-7 text-xs gap-1 text-muted-foreground hover:text-foreground"
+   410→   410→            onClick={() => setTrackDataVisible(!trackDataVisible)}
+   411→   411→          >
+   412→   412→            {trackDataVisible ? (
+   413→   413→              <>Hide <ChevronUp className="h-3 w-3" /></>
+   414→   414→            ) : (
+   415→   415→              <>Show <ChevronDown className="h-3 w-3" /></>
+   416→   416→            )}
+   417→   417→          </Button>
+   418→   418→        </div>
+   419→   419→      </div>
+   420→   420→      {trackDataVisible && (
+   421→   421→        <motion.div
+   422→   422→          initial={{ opacity: 0, height: 0 }}
+   423→   423→          animate={{ opacity: 1, height: 'auto' }}
+   424→   424→          exit={{ opacity: 0, height: 0 }}
+   425→   425→          transition={{ duration: 0.2 }}
+   426→   426→          className="px-4 sm:px-6 pb-3"
+   427→   427→        >
+   428→   428→          <TrackGeometryPanel />
+   429→   429→        </motion.div>
+   430→   430→      )}
+   431→   431→
+   432→   432→      <Separator />
+   433→   433→
+   434→   434→      {/* Mini Stats Summary - wraps on mobile */}
+   435→   435→      <div className="flex flex-wrap items-center gap-2 sm:gap-4 px-4 sm:px-6 py-2.5 bg-muted/50 border-y border-border/30 text-xs">
+   436→   436→        <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-card border border-border/50">
+   437→   437→          <Clock className="h-3 w-3 text-muted-foreground" />
+   438→   438→          <span className="text-muted-foreground hidden sm:inline">Total Hours:</span>
+   439→   439→          <span className="text-muted-foreground sm:hidden">Hrs:</span>
+   440→   440→          <span className="font-semibold text-foreground">{totalHours.toFixed(1)}h</span>
+   441→   441→        </span>
+   442→   442→        <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-card border border-border/50">
+   443→   443→          <Users className="h-3 w-3 text-muted-foreground" />
+   444→   444→          <span className="text-muted-foreground hidden sm:inline">Departments:</span>
+   445→   445→          <span className="text-muted-foreground sm:hidden">Depts:</span>
+   446→   446→          <span className="font-semibold text-foreground">{departmentsInvolved}</span>
+   447→   447→        </span>
+   448→   448→        <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-card border border-border/50">
+   449→   449→          <Blocks className="h-3 w-3 text-muted-foreground" />
+   450→   450→          <span className="text-muted-foreground">Blocks:</span>
+   451→   451→          <span className="font-semibold text-foreground">{totalBlocks}</span>
+   452→   452→        </span>
+   453→   453→        <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-card border border-border/50">
+   454→   454→          <Bot className="h-3 w-3 text-[#1a237e]" />
+   455→   455→          <span className="text-muted-foreground">AI:</span>
+   456→   456→          <span className="font-semibold text-[#283593]">{aiRecommended}</span>
+   457→   457→        </span>
+   458→   458→        {criticalConflicts > 0 ? (
+   459→   459→          <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-red-50 border border-red-200 text-red-600 font-medium">
+   460→   460→            <AlertTriangle className="h-3 w-3" />
+   461→   461→            {criticalConflicts} conflict{criticalConflicts > 1 ? 's' : ''}
+   462→   462→          </span>
+   463→   463→        ) : (
+   464→   464→          <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-600">
+   465→   465→            <CheckCircle2 className="h-3 w-3" />
+   466→   466→            No conflicts
+   467→   467→          </span>
+   468→   468→        )}
+   469→   469→      </div>
+   470→   470→
+   471→   471→      <Separator />
+   472→   472→
+   473→   473→      {/* Main content: Timeline + Detail Panel */}
+   474→   474→      <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
+   475→   475→        {/* Left: Timeline */}
+   476→   476→        <div className="flex-1 flex flex-col overflow-hidden">
+   477→   477→          {/* Day selector - scrollable with visible scroll */}
+   478→   478→          <div className="flex items-center gap-2 px-4 sm:px-6 py-2.5 border-b border-border bg-background">
+   479→   479→            <Button variant="ghost" size="sm" className="h-9 w-9 min-h-[44px] min-w-[44px] sm:h-7 sm:w-7 sm:min-h-0 sm:min-w-0 p-0" onClick={goPrevDay}>
+   480→   480→              <ChevronLeft className="h-4 w-4" />
+   481→   481→            </Button>
+   482→   482→
+   483→   483→            {/* Day Pills - horizontally scrollable */}
+   484→   484→            <div className="flex items-center gap-1 overflow-x-auto scrollbar-thin">
+   485→   485→              {dayLabels.map((day) => (
+   486→   486→                <button
+   487→   487→                  key={day.date}
+   488→   488→                  className={cn(
+   489→   489→                    'flex flex-col items-center px-2.5 py-1.5 rounded-lg text-[10px] transition-all duration-150 shrink-0 min-w-[40px] min-h-[44px] justify-center sm:min-h-0',
+   490→   490→                    day.date === selectedDate
+   491→   491→                      ? 'bg-[#283593] text-white shadow-sm shadow-[#283593]/25'
+   492→   492→                      : day.isToday
+   493→   493→                      ? 'bg-[#e8eaf6] text-[#0d47a1] ring-1 ring-[#5c6bc0] font-medium'
+   494→   494→                      : 'text-muted-foreground hover:bg-muted/50',
+   495→   495→                  )}
+   496→   496→                  onClick={() => setSelectedDate(day.date)}
+   497→   497→                >
+   498→   498→                  <span className="text-[9px] uppercase">{day.label}</span>
+   499→   499→                  <span className={cn('text-sm leading-tight', day.date === selectedDate ? 'font-bold' : 'font-medium')}>{day.dayNum}</span>
+   500→   500→                  {day.hasBlocks && (
+   501→   501→                    <span className={cn('h-1.5 w-1.5 rounded-full mt-0.5', day.date === selectedDate ? 'bg-background' : 'bg-[#1a237e]')} />
+   502→   502→                  )}
+   503→   503→                </button>
+   504→   504→              ))}
+   505→   505→            </div>
+   506→   506→
+   507→   507→            <Button variant="ghost" size="sm" className="h-9 w-9 min-h-[44px] min-w-[44px] sm:h-7 sm:w-7 sm:min-h-0 sm:min-w-0 p-0" onClick={goNextDay}>
+   508→   508→              <ChevronRight className="h-4 w-4" />
+   509→   509→            </Button>
+   510→   510→
+   511→   511→            <span className="text-xs font-medium text-foreground ml-2 hidden sm:inline">
+   512→   512→              {format(parseISO(selectedDate), 'EEEE, MMMM d, yyyy')}
+   513→   513→            </span>
+   514→   514→            <span className="text-xs font-medium text-foreground ml-2 sm:hidden">
+   515→   515→              {format(parseISO(selectedDate), 'EEE, MMM d')}
+   516→   516→            </span>
+   517→   517→          </div>
+   518→   518→
+   519→   519→          {/* Optimization progress */}
+   520→   520→          {(isOptimizing || optimizationDone) && (
+   521→   521→            <div className="px-4 sm:px-6 py-3">
+   522→   522→              <OptimizationProgress isRunning={isOptimizing} onComplete={onOptimizationComplete} />
+   523→   523→            </div>
+   524→   524→          )}
+   525→   525→
+   526→   526→          {/* Timeline/Gantt toggle */}
+   527→   527→          <div className="flex items-center gap-0.5 px-4 sm:px-6 py-1.5 border-b border-border bg-muted/10">
+   528→   528→            <div className="flex items-center bg-muted/50 rounded-md p-0.5 gap-0">
+   529→   529→              <Button
+   530→   530→                variant={timelineMode === 'timeline' ? 'secondary' : 'ghost'}
+   531→   531→                size="sm"
+   532→   532→                className={cn("text-[10px] h-6 px-2.5 gap-1 rounded-sm", timelineMode === 'timeline' && "shadow-sm")}
+   533→   533→                onClick={() => setTimelineMode('timeline')}
+   534→   534→              >
+   535→   535→                <List className="h-3 w-3" />Timeline
+   536→   536→              </Button>
+   537→   537→              <Button
+   538→   538→                variant={timelineMode === 'gantt' ? 'secondary' : 'ghost'}
+   539→   539→                size="sm"
+   540→   540→                className={cn("text-[10px] h-6 px-2.5 gap-1 rounded-sm", timelineMode === 'gantt' && "shadow-sm")}
+   541→   541→                onClick={() => setTimelineMode('gantt')}
+   542→   542→              >
+   543→   543→                <GanttChart className="h-3 w-3" />Gantt
+   544→   544→              </Button>
+   545→   545→              <Button
+   546→   546→                variant={timelineMode === 'crew' ? 'secondary' : 'ghost'}
+   547→   547→                size="sm"
+   548→   548→                className={cn("text-[10px] h-6 px-2.5 gap-1 rounded-sm", timelineMode === 'crew' && "shadow-sm")}
+   549→   549→                onClick={() => setTimelineMode('crew')}
+   550→   550→              >
+   551→   551→                <HardHat className="h-3 w-3" />Crew
+   552→   552→              </Button>
+   553→   553→            </div>
+   554→   554→          </div>
+   555→   555→
+   556→   556→          {/* Timeline / Gantt / Crew - horizontally scrollable on mobile */}
+   557→   557→          <div className="flex-1 overflow-hidden print-keep dot-grid relative">
+   558→   558→            {timelineMode === 'crew' ? (
+   559→   559→              <div className="h-full px-2 sm:px-4 md:px-6 py-3 overflow-auto">
+   560→   560→                <CrewSchedulingPanel />
+   561→   561→              </div>
+   562→   562→            ) : timelineMode === 'timeline' ? (
+   563→   563→              <div className="h-full px-2 sm:px-4 md:px-6 py-3 overflow-auto">
+   564→   564→                {isMobile && (
+   565→   565→                  <div className="text-[10px] text-muted-foreground mb-2 flex items-center gap-1">
+   566→   566→                    <span>↔ Pinch or scroll to zoom timeline</span>
+   567→   567→                  </div>
+   568→   568→                )}
+   569→   569→                <BlockTimeline
+   570→   570→                  selectedDate={selectedDate}
+   571→   571→                  selectedBlockId={selectedBlockId}
+   572→   572→                  onSelectBlock={handleSelectBlock}
+   573→   573→                  planBlockIds={effectivePlanBlockIds}
+   574→   574→                  extraBlocks={customBlocks}
+   575→   575→                />
+   576→   576→              </div>
+   577→   577→            ) : (
+   578→   578→              <GanttView
+   579→   579→                selectedBlockId={selectedBlockId}
+   580→   580→                onSelectBlock={handleSelectBlock}
+   581→   581→                planBlockIds={effectivePlanBlockIds}
+   582→   582→                extraBlocks={customBlocks}
+   583→   583→              />
+   584→   584→            )}
+   585→   585→          </div>
+   586→   586→        </div>
+   587→   587→
+   588→   588→        {/* Right: Detail panel - Sheet on mobile, side panel on desktop */}
+   589→   589→        {isMobile ? (
+   590→   590→          <Sheet open={detailSheetOpen} onOpenChange={(open) => { setDetailSheetOpen(open); if (!open) setSelectedBlockId(null) }}>
+   591→   591→            <SheetContent side="bottom" className="h-[85vh] overflow-y-auto">
+   592→   592→              <SheetHeader>
+   593→   593→                <SheetTitle className="text-sm">Block Details</SheetTitle>
+   594→   594→              </SheetHeader>
+   595→   595→              {detailContent}
+   596→   596→            </SheetContent>
+   597→   597→          </Sheet>
+   598→   598→        ) : (
+   599→   599→          selectedBlock ? (
+   600→   600→            <div className="w-full lg:w-[340px] xl:w-[380px] border-l border-border overflow-y-auto bg-background">
+   601→   601→              {detailContent}
+   602→   602→            </div>
+   603→   603→          ) : (
+   604→   604→            <div className="hidden lg:flex w-[340px] xl:w-[380px] border-l border-border items-center justify-center bg-muted/10">
+   605→   605→              <div className="text-center text-muted-foreground">
+   606→   606→                <Info className="h-8 w-8 mx-auto mb-2 opacity-30" />
+   607→   607→                <p className="text-xs font-medium">Select a block to view details</p>
+   608→   608→                <p className="text-[10px] mt-1">Click on any block in the timeline</p>
+   609→   609→              </div>
+   610→   610→            </div>
+   611→   611→          )
+   612→   612→        )}
+   613→   613→      </div>
+   614→   614→
+   615→   615→      {/* Manual Block Form Dialog */}
+   616→   616→      <ManualBlockForm
+   617→   617→        open={manualFormOpen}
+   618→   618→        onOpenChange={setManualFormOpen}
+   619→   619→        onSubmit={handleCreateManualBlock}
+   620→   620→      />
+   621→   621→    </div>
+   622→   622→  )
+   623→   623→}
+   624→   624→

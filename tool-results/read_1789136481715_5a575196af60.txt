@@ -1,0 +1,928 @@
+     1→'use client'
+     2→
+     3→import { useState, useEffect, useMemo } from 'react'
+     4→import { plans, blocks, maintenanceRequests, conflicts, type SimPlan } from '@/data/simulated-data'
+     5→import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+     6→import { Badge } from '@/components/ui/badge'
+     7→import { Button } from '@/components/ui/button'
+     8→import { Separator } from '@/components/ui/separator'
+     9→import { Switch } from '@/components/ui/switch'
+    10→import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu'
+    11→import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
+    12→import { Input } from '@/components/ui/input'
+    13→import { Label } from '@/components/ui/label'
+    14→import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+    15→import {
+    16→  AlertDialog,
+    17→  AlertDialogAction,
+    18→  AlertDialogCancel,
+    19→  AlertDialogContent,
+    20→  AlertDialogDescription,
+    21→  AlertDialogFooter,
+    22→  AlertDialogHeader,
+    23→  AlertDialogTitle,
+    24→} from '@/components/ui/alert-dialog'
+    25→import { useAppStore } from '@/store/app-store'
+    26→import { FileText, Calendar, GitBranch, Clock, CheckCircle2, AlertCircle, ChevronRight, Download, Share2, Printer, FileDown, GitCompare, Trophy, Sparkles, ShieldAlert, Plus, Trash2, CalendarPlus, Boxes, Gauge, Bot } from 'lucide-react'
+    27→import { PrintHeader } from './print-header'
+    28→import { EmptyState } from './empty-state'
+    29→import { toast } from 'sonner'
+    30→import { motion, AnimatePresence } from 'framer-motion'
+    31→import { useIsMobile } from '@/hooks/use-mobile'
+    32→
+    33→// Custom plans created by the user (persisted to localStorage)
+    34→interface CustomPlan extends SimPlan {
+    35→  isCustom: boolean
+    36→}
+    37→
+    38→const CUSTOM_PLANS_KEY = 'railopt-custom-plans'
+    39→
+    40→function loadCustomPlans(): CustomPlan[] {
+    41→  try {
+    42→    const raw = localStorage.getItem(CUSTOM_PLANS_KEY)
+    43→    if (!raw) return []
+    44→    const parsed = JSON.parse(raw) as CustomPlan[]
+    45→    return Array.isArray(parsed) ? parsed : []
+    46→  } catch {
+    47→    return []
+    48→  }
+    49→}
+    50→
+    51→function persistCustomPlans(list: CustomPlan[]) {
+    52→  try {
+    53→    localStorage.setItem(CUSTOM_PLANS_KEY, JSON.stringify(list))
+    54→  } catch {
+    55→    // storage unavailable — plans stay in memory for this session
+    56→  }
+    57→}
+    58→
+    59→const statusColors: Record<string, string> = {
+    60→  draft: 'bg-muted text-muted-foreground',
+    61→  optimizing: 'bg-info/10 text-info border-info/20',
+    62→  recommended: 'bg-info/10 text-info border-info/20',
+    63→  reviewed: 'bg-primary/10 text-primary border-primary/20',
+    64→  verified: 'bg-success/10 text-success border-success/20',
+    65→  finalized: 'bg-success/10 text-success border-success/20',
+    66→  approved: 'bg-success/10 text-success border-success/20',
+    67→}
+    68→
+    69→const statusLabels: Record<string, string> = {
+    70→  draft: 'Draft',
+    71→  optimizing: 'Optimizing',
+    72→  recommended: 'AI Recommended',
+    73→  reviewed: 'Reviewed',
+    74→  verified: 'Verified',
+    75→  finalized: 'Finalized',
+    76→  approved: 'Approved',
+    77→}
+    78→
+    79→const workflowSteps = ['Draft', 'Optimizing', 'Recommended', 'Reviewed', 'Verified', 'Finalized', 'Approved']
+    80→
+    81→function getStepIndex(status: string): number {
+    82→  const map: Record<string, number> = {
+    83→    draft: 0, optimizing: 1, recommended: 2, reviewed: 3, verified: 4, finalized: 5, approved: 6,
+    84→  }
+    85→  return map[status] ?? 0
+    86→}
+    87→
+    88→// Plan health scores (simulated)
+    89→const planHealthScores: Record<string, number> = {
+    90→  'plan-001': 85,
+    91→  'plan-002': 72,
+    92→}
+    93→
+    94→// Last optimized timestamps (simulated)
+    95→const lastOptimized: Record<string, string> = {
+    96→  'plan-001': '2025-01-26T14:32:00',
+    97→  'plan-002': '2025-01-25T10:15:00',
+    98→}
+    99→
+   100→// Circular progress indicator component
+   101→function CircularProgress({ value, size = 40, strokeWidth = 3 }: { value: number; size?: number; strokeWidth?: number }) {
+   102→  const radius = (size - strokeWidth) / 2
+   103→  const circumference = 2 * Math.PI * radius
+   104→  const progress = ((100 - value) / 100) * circumference
+   105→
+   106→  const color = value >= 80 ? 'text-emerald-500' : value >= 60 ? 'text-amber-500' : 'text-red-500'
+   107→  const strokeColor = value >= 80 ? '#10b981' : value >= 60 ? '#f59e0b' : '#ef4444'
+   108→  const bgColor = value >= 80 ? '#10b98120' : value >= 60 ? '#f59e0b20' : '#ef444420'
+   109→
+   110→  return (
+   111→    <div className="relative inline-flex items-center justify-center" style={{ width: size, height: size }}>
+   112→      <svg width={size} height={size} className="-rotate-90">
+   113→        <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke={bgColor} strokeWidth={strokeWidth} />
+   114→        <circle
+   115→          cx={size / 2}
+   116→          cy={size / 2}
+   117→          r={radius}
+   118→          fill="none"
+   119→          stroke={strokeColor}
+   120→          strokeWidth={strokeWidth}
+   121→          strokeDasharray={circumference}
+   122→          strokeDashoffset={progress}
+   123→          strokeLinecap="round"
+   124→          className="transition-all duration-700 ease-out"
+   125→        />
+   126→      </svg>
+   127→      <span className={`absolute text-[10px] font-bold ${color}`}>{value}</span>
+   128→    </div>
+   129→  )
+   130→}
+   131→
+   132→function exportPlanAsJSON(plan: typeof plans[0], planBlocks: typeof blocks, planRequests: typeof maintenanceRequests) {
+   133→  const exportData = {
+   134→    plan: { id: plan.id, name: plan.name, type: plan.type, startDate: plan.startDate, endDate: plan.endDate, status: plan.status, version: plan.version },
+   135→    blocks: planBlocks.map(b => ({ id: b.id, name: b.name, section: b.section, stationFrom: b.stationFrom, stationTo: b.stationTo, startTime: b.startTime, endTime: b.endTime, duration: b.duration, department: b.department, line: b.line, isAiRecommended: b.isAiRecommended, confidence: b.aiConfidence })),
+   136→    maintenanceRequests: planRequests.map(r => ({ id: r.id, title: r.title, department: r.department, priority: r.priority, severity: r.severity, status: r.status })),
+   137→    exportedAt: new Date().toISOString(),
+   138→  }
+   139→  const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' })
+   140→  const url = URL.createObjectURL(blob)
+   141→  const a = document.createElement('a')
+   142→  a.href = url
+   143→  a.download = `plan-${plan.id}-${new Date().toISOString().split('T')[0]}.json`
+   144→  a.click()
+   145→  URL.revokeObjectURL(url)
+   146→  toast.success('Plan exported', { description: `${plan.name} downloaded as JSON` })
+   147→}
+   148→
+   149→function exportPlanAsCSV(plan: typeof plans[0], planBlocks: typeof blocks) {
+   150→  const headers = ['Block ID', 'Name', 'Section', 'From', 'To', 'Start', 'End', 'Duration (min)', 'Department', 'Line', 'AI Recommended', 'Confidence']
+   151→  const rows = planBlocks.map(b => [b.id, b.name, b.section, b.stationFrom, b.stationTo, b.startTime, b.endTime, b.duration, b.department, b.line, b.isAiRecommended ? 'Yes' : 'No', b.aiConfidence.toFixed(2)])
+   152→  const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n')
+   153→  const blob = new Blob([csv], { type: 'text/csv' })
+   154→  const url = URL.createObjectURL(blob)
+   155→  const a = document.createElement('a')
+   156→  a.href = url
+   157→  a.download = `plan-${plan.id}-${new Date().toISOString().split('T')[0]}.csv`
+   158→  a.click()
+   159→  URL.revokeObjectURL(url)
+   160→  toast.success('Plan exported', { description: `${plan.name} downloaded as CSV` })
+   161→}
+   162→
+   163→async function sharePlan(plan: typeof plans[0], planBlocks: typeof blocks) {
+   164→  const summary = `📋 ${plan.name}\nStatus: ${statusLabels[plan.status]}\nPeriod: ${plan.startDate} → ${plan.endDate}\nBlocks: ${planBlocks.length}\nTotal Duration: ${Math.round(planBlocks.reduce((s, b) => s + b.duration, 0) / 60)}h\n\nBlocks:\n${planBlocks.map(b => `• ${b.name} (${b.section}, ${b.department})`).join('\n')}`
+   165→  try {
+   166→    await navigator.clipboard.writeText(summary)
+   167→    toast.success('Plan summary copied', { description: 'Paste it anywhere to share' })
+   168→  } catch {
+   169→    toast.error('Failed to copy', { description: 'Please try again' })
+   170→  }
+   171→}
+   172→
+   173→function exportAllPlansAsJSON(planList: (typeof plans[0])[]) {
+   174→  const exportData = {
+   175→    plans: planList.map((plan) => {
+   176→      const planBlocks = blocks.filter((b) => plan.blockIds.includes(b.id))
+   177→      const planRequests = maintenanceRequests.filter((mr) => planBlocks.some((b) => b.maintenanceReqIds.includes(mr.id)))
+   178→      return {
+   179→        plan: { id: plan.id, name: plan.name, type: plan.type, startDate: plan.startDate, endDate: plan.endDate, status: plan.status, version: plan.version },
+   180→        blocks: planBlocks.map(b => ({ id: b.id, name: b.name, section: b.section, startTime: b.startTime, endTime: b.endTime, duration: b.duration, department: b.department })),
+   181→        maintenanceRequests: planRequests.map(r => ({ id: r.id, title: r.title, department: r.department, priority: r.priority, status: r.status })),
+   182→      }
+   183→    }),
+   184→    exportedAt: new Date().toISOString(),
+   185→  }
+   186→  const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' })
+   187→  const url = URL.createObjectURL(blob)
+   188→  const a = document.createElement('a')
+   189→  a.href = url
+   190→  a.download = `railopt-all-plans-${new Date().toISOString().split('T')[0]}.json`
+   191→  a.click()
+   192→  URL.revokeObjectURL(url)
+   193→  toast.success('All plans exported', { description: `${planList.length} plans downloaded as JSON` })
+   194→}
+   195→
+   196→function exportAllPlansAsCSV(planList: (typeof plans[0])[]) {
+   197→  const headers = ['Plan', 'Block ID', 'Name', 'Section', 'From', 'To', 'Start', 'End', 'Duration (min)', 'Department', 'Line', 'AI Recommended']
+   198→  const rows: string[] = []
+   199→  for (const plan of planList) {
+   200→    const planBlocks = blocks.filter((b) => plan.blockIds.includes(b.id))
+   201→    for (const b of planBlocks) {
+   202→      rows.push([plan.name, b.id, b.name, b.section, b.stationFrom, b.stationTo, b.startTime, b.endTime, String(b.duration), b.department, b.line, b.isAiRecommended ? 'Yes' : 'No'].join(','))
+   203→    }
+   204→  }
+   205→  const csv = [headers.join(','), ...rows].join('\n')
+   206→  const blob = new Blob([csv], { type: 'text/csv' })
+   207→  const url = URL.createObjectURL(blob)
+   208→  const a = document.createElement('a')
+   209→  a.href = url
+   210→  a.download = `railopt-all-plans-${new Date().toISOString().split('T')[0]}.csv`
+   211→  a.click()
+   212→  URL.revokeObjectURL(url)
+   213→  toast.success('All plans exported', { description: `${planList.length} plans downloaded as CSV` })
+   214→}
+   215→
+   216→// Comparison table component
+   217→function PlanComparisonTable() {
+   218→  const weeklyPlan = plans.find(p => p.type === 'weekly')
+   219→  const monthlyPlan = plans.find(p => p.type === 'monthly')
+   220→
+   221→  if (!weeklyPlan || !monthlyPlan) return null
+   222→
+   223→  const weeklyBlocks = blocks.filter(b => weeklyPlan.blockIds.includes(b.id))
+   224→  const monthlyBlocks = blocks.filter(b => monthlyPlan.blockIds.includes(b.id))
+   225→  const weeklyDuration = weeklyBlocks.reduce((s, b) => s + b.duration, 0)
+   226→  const monthlyDuration = monthlyBlocks.reduce((s, b) => s + b.duration, 0)
+   227→  const weeklyDepts = new Set(weeklyBlocks.map(b => b.department))
+   228→  const monthlyDepts = new Set(monthlyBlocks.map(b => b.department))
+   229→  const weeklyAiCount = weeklyBlocks.filter(b => b.isAiRecommended).length
+   230→  const monthlyAiCount = monthlyBlocks.filter(b => b.isAiRecommended).length
+   231→  const weeklyConflicts = conflicts.filter(c => weeklyBlocks.some(b => b.id === c.blockId)).length
+   232→  const monthlyConflicts = conflicts.filter(c => monthlyBlocks.some(b => b.id === c.blockId)).length
+   233→  const weeklyHealth = planHealthScores[weeklyPlan.id] ?? 0
+   234→  const monthlyHealth = planHealthScores[monthlyPlan.id] ?? 0
+   235→
+   236→  const metrics = [
+   237→    { label: 'Block Count', weekly: weeklyBlocks.length, monthly: monthlyBlocks.length, better: 'higher' as const },
+   238→    { label: 'Total Hours', weekly: Math.round(weeklyDuration / 60), monthly: Math.round(monthlyDuration / 60), better: 'higher' as const },
+   239→    { label: 'Departments', weekly: weeklyDepts.size, monthly: monthlyDepts.size, better: 'higher' as const },
+   240→    { label: 'AI Recommendations', weekly: weeklyAiCount, monthly: monthlyAiCount, better: 'higher' as const },
+   241→    { label: 'Conflicts', weekly: weeklyConflicts, monthly: monthlyConflicts, better: 'lower' as const },
+   242→    { label: 'Health Score', weekly: weeklyHealth, monthly: monthlyHealth, better: 'higher' as const },
+   243→  ]
+   244→
+   245→  return (
+   246→    <Card className="overflow-hidden border-[#9fa8da] dark:border-[#1a237e]">
+   247→      <CardHeader className="pb-3">
+   248→        <div className="flex items-center gap-2">
+   249→          <div className="h-8 w-8 rounded-lg bg-[#1a237e]/10 flex items-center justify-center shrink-0">
+   250→            <GitCompare className="h-4 w-4 text-[#283593] dark:text-[#3f51b5]" />
+   251→          </div>
+   252→          <div>
+   253→            <CardTitle className="text-sm">Plan Comparison</CardTitle>
+   254→            <CardDescription className="text-xs">Side-by-side analysis of Weekly vs Monthly plans</CardDescription>
+   255→          </div>
+   256→        </div>
+   257→      </CardHeader>
+   258→      <CardContent>
+   259→        <div className="overflow-x-auto">
+   260→          <table className="w-full text-sm">
+   261→            <thead>
+   262→              <tr className="border-b border-border">
+   263→                <th className="text-left py-2.5 px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Metric</th>
+   264→                <th className="text-center py-2.5 px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+   265→                  <span className="flex items-center justify-center gap-1.5">
+   266→                    <Calendar className="h-3 w-3" />
+   267→                    Weekly Plan
+   268→                  </span>
+   269→                </th>
+   270→                <th className="text-center py-2.5 px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+   271→                  <span className="flex items-center justify-center gap-1.5">
+   272→                    <Calendar className="h-3 w-3" />
+   273→                    Monthly Plan
+   274→                  </span>
+   275→                </th>
+   276→                <th className="text-center py-2.5 px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+   277→                  <span className="flex items-center justify-center gap-1.5">
+   278→                    <Trophy className="h-3 w-3" />
+   279→                    Winner
+   280→                  </span>
+   281→                </th>
+   282→              </tr>
+   283→            </thead>
+   284→            <tbody>
+   285→              {metrics.map((metric) => {
+   286→                const weeklyWins = metric.better === 'higher' ? metric.weekly > metric.monthly : metric.weekly < metric.monthly
+   287→                const monthlyWins = metric.better === 'higher' ? metric.monthly > metric.weekly : metric.monthly < metric.weekly
+   288→                const tie = metric.weekly === metric.monthly
+   289→
+   290→                const formatValue = (label: string, value: number) => {
+   291→                  if (label === 'Total Hours') return `${value}h`
+   292→                  if (label === 'Health Score') return `${value}/100`
+   293→                  if (label === 'Conflicts') return `${value}`
+   294→                  return String(value)
+   295→                }
+   296→
+   297→                return (
+   298→                  <tr key={metric.label} className="border-b border-border/50 last:border-0">
+   299→                    <td className="py-2.5 px-3 text-xs font-medium text-foreground">{metric.label}</td>
+   300→                    <td className={`text-center py-2.5 px-3 text-xs font-semibold tabular-nums ${weeklyWins ? 'text-[#283593] dark:text-[#3f51b5]' : ''}`}>
+   301→                      <span className="flex items-center justify-center gap-1">
+   302→                        {weeklyWins && <Sparkles className="h-3 w-3 text-[#1a237e]" />}
+   303→                        {formatValue(metric.label, metric.weekly)}
+   304→                      </span>
+   305→                    </td>
+   306→                    <td className={`text-center py-2.5 px-3 text-xs font-semibold tabular-nums ${monthlyWins ? 'text-[#283593] dark:text-[#3f51b5]' : ''}`}>
+   307→                      <span className="flex items-center justify-center gap-1">
+   308→                        {monthlyWins && <Sparkles className="h-3 w-3 text-[#1a237e]" />}
+   309→                        {formatValue(metric.label, metric.monthly)}
+   310→                      </span>
+   311→                    </td>
+   312→                    <td className="text-center py-2.5 px-3">
+   313→                      {tie ? (
+   314→                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 bg-muted/50">Tie</Badge>
+   315→                      ) : weeklyWins ? (
+   316→                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 bg-[#e8eaf6] text-[#0d47a1] border-[#9fa8da] dark:bg-[#0d1442]/30 dark:text-[#3f51b5] dark:border-[#1a237e]">Weekly</Badge>
+   317→                      ) : (
+   318→                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 bg-[#e8eaf6] text-[#0d47a1] border-[#9fa8da] dark:bg-[#0d1442]/30 dark:text-[#3f51b5] dark:border-[#1a237e]">Monthly</Badge>
+   319→                      )}
+   320→                    </td>
+   321→                  </tr>
+   322→                )
+   323→              })}
+   324→              {/* Status row */}
+   325→              <tr className="border-b border-border/50">
+   326→                <td className="py-2.5 px-3 text-xs font-medium text-foreground">Status</td>
+   327→                <td className="text-center py-2.5 px-3">
+   328→                  <Badge variant="outline" className={`text-[10px] px-1.5 py-0 h-4 ${statusColors[weeklyPlan.status]}`}>{statusLabels[weeklyPlan.status]}</Badge>
+   329→                </td>
+   330→                <td className="text-center py-2.5 px-3">
+   331→                  <Badge variant="outline" className={`text-[10px] px-1.5 py-0 h-4 ${statusColors[monthlyPlan.status]}`}>{statusLabels[monthlyPlan.status]}</Badge>
+   332→                </td>
+   333→                <td className="text-center py-2.5 px-3">
+   334→                  {getStepIndex(weeklyPlan.status) > getStepIndex(monthlyPlan.status) ? (
+   335→                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 bg-[#e8eaf6] text-[#0d47a1] border-[#9fa8da] dark:bg-[#0d1442]/30 dark:text-[#3f51b5] dark:border-[#1a237e]">Weekly</Badge>
+   336→                  ) : getStepIndex(monthlyPlan.status) > getStepIndex(weeklyPlan.status) ? (
+   337→                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 bg-[#e8eaf6] text-[#0d47a1] border-[#9fa8da] dark:bg-[#0d1442]/30 dark:text-[#3f51b5] dark:border-[#1a237e]">Monthly</Badge>
+   338→                  ) : (
+   339→                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 bg-muted/50">Tie</Badge>
+   340→                  )}
+   341→                </td>
+   342→              </tr>
+   343→            </tbody>
+   344→          </table>
+   345→        </div>
+   346→        <div className="mt-3 p-2.5 rounded-md bg-[#e8eaf6]/50 dark:bg-[#0d1442]/20 border border-teal-100 dark:border-teal-900/50">
+   347→          <p className="text-[10px] text-[#0d47a1] dark:text-[#3f51b5] flex items-center gap-1.5">
+   348→            <ShieldAlert className="h-3 w-3" />
+   349→            Weekly plan leads in most metrics. Monthly plan is still in draft — run AI optimization to improve its score.
+   350→          </p>
+   351→        </div>
+   352→      </CardContent>
+   353→    </Card>
+   354→  )
+   355→}
+   356→
+   357→export function PlansView() {
+   358→  const { setActiveView, currentUserName } = useAppStore()
+   359→  const isMobile = useIsMobile()
+   360→  const [compareMode, setCompareMode] = useState(false)
+   361→  const [expandedPlanId, setExpandedPlanId] = useState<string | null>(null)
+   362→  // Custom plan wizard
+   363→  const [customPlans, setCustomPlans] = useState<CustomPlan[]>([])
+   364→  const [createOpen, setCreateOpen] = useState(false)
+   365→  const [newPlanName, setNewPlanName] = useState('')
+   366→  const [newPlanType, setNewPlanType] = useState<'weekly' | 'monthly'>('weekly')
+   367→  const [newPlanStart, setNewPlanStart] = useState('')
+   368→  const [newPlanEnd, setNewPlanEnd] = useState('')
+   369→  const [newPlanNotes, setNewPlanNotes] = useState('')
+   370→  const [deletePlanId, setDeletePlanId] = useState<string | null>(null)
+   371→
+   372→  // Load persisted custom plans on mount (async hydration to avoid render cascade)
+   373→  useEffect(() => {
+   374→    const t = setTimeout(() => {
+   375→      try {
+   376→        const raw = localStorage.getItem(CUSTOM_PLANS_KEY)
+   377→        if (!raw) return
+   378→        const parsed = JSON.parse(raw) as CustomPlan[]
+   379→        if (Array.isArray(parsed) && parsed.length > 0) {
+   380→          setCustomPlans(parsed)
+   381→        }
+   382→      } catch {
+   383→        // ignore malformed persisted data
+   384→      }
+   385→    }, 0)
+   386→    return () => clearTimeout(t)
+   387→  }, [])
+   388→
+   389→  // Base plans first, then user-created plans
+   390→  const allPlans = useMemo(() => [...customPlans, ...plans], [customPlans])
+   391→
+   392→  // Portfolio stats strip
+   393→  const stats = useMemo(() => {
+   394→    const allBlockIds = new Set(allPlans.flatMap((p) => p.blockIds))
+   395→    const allBlocks = blocks.filter((b) => allBlockIds.has(b.id))
+   396→    const totalMinutes = allBlocks.reduce((s, b) => s + b.duration, 0)
+   397→    const aiCount = allBlocks.filter((b) => b.isAiRecommended).length
+   398→    return {
+   399→      plans: allPlans.length,
+   400→      blocks: allBlocks.length,
+   401→      hours: Math.round(totalMinutes / 60),
+   402→      aiPct: allBlocks.length > 0 ? Math.round((aiCount / allBlocks.length) * 100) : 0,
+   403→    }
+   404→  }, [allPlans])
+   405→
+   406→  const handleCreatePlan = () => {
+   407→    const name = newPlanName.trim()
+   408→    if (!name) {
+   409→      toast.error('Plan name is required')
+   410→      return
+   411→    }
+   412→    if (!newPlanStart || !newPlanEnd) {
+   413→      toast.error('Start and end dates are required')
+   414→      return
+   415→    }
+   416→    if (newPlanEnd < newPlanStart) {
+   417→      toast.error('End date must be on or after the start date')
+   418→      return
+   419→    }
+   420→    const plan: CustomPlan = {
+   421→      id: `custom-plan-${Date.now()}`,
+   422→      name,
+   423→      type: newPlanType,
+   424→      startDate: newPlanStart,
+   425→      endDate: newPlanEnd,
+   426→      status: 'draft',
+   427→      version: 1,
+   428→      createdBy: currentUserName || 'You',
+   429→      blockIds: [],
+   430→      isCustom: true,
+   431→    }
+   432→    const next = [plan, ...customPlans]
+   433→    setCustomPlans(next)
+   434→    persistCustomPlans(next)
+   435→    setCreateOpen(false)
+   436→    setNewPlanName('')
+   437→    setNewPlanStart('')
+   438→    setNewPlanEnd('')
+   439→    setNewPlanNotes('')
+   440→    setExpandedPlanId(plan.id)
+   441→    toast.success(`Plan "${name}" created`, {
+   442→      description: `${newPlanType === 'weekly' ? 'Weekly' : 'Monthly'} · ${newPlanStart} → ${newPlanEnd}. Add blocks from Planning, then run AI optimization.`,
+   443→    })
+   444→  }
+   445→
+   446→  const handleDeletePlan = () => {
+   447→    if (!deletePlanId) return
+   448→    const target = customPlans.find((p) => p.id === deletePlanId)
+   449→    const next = customPlans.filter((p) => p.id !== deletePlanId)
+   450→    setCustomPlans(next)
+   451→    persistCustomPlans(next)
+   452→    if (expandedPlanId === deletePlanId) setExpandedPlanId(null)
+   453→    setDeletePlanId(null)
+   454→    if (target) {
+   455→      toast.success('Plan deleted', { description: `"${target.name}" was removed.` })
+   456→    }
+   457→  }
+   458→
+   459→  const openCreateDialog = () => {
+   460→    // Suggest a sensible default window starting next Monday
+   461→    const today = new Date()
+   462→    const nextMonday = new Date(today)
+   463→    nextMonday.setDate(today.getDate() + ((8 - today.getDay()) % 7 || 7))
+   464→    const sunday = new Date(nextMonday)
+   465→    sunday.setDate(nextMonday.getDate() + 6)
+   466→    const iso = (d: Date) => d.toISOString().split('T')[0]
+   467→    setNewPlanName(`Block Plan — ${iso(nextMonday)} week`)
+   468→    setNewPlanType('weekly')
+   469→    setNewPlanStart(iso(nextMonday))
+   470→    setNewPlanEnd(iso(sunday))
+   471→    setCreateOpen(true)
+   472→  }
+   473→
+   474→  const handlePrint = () => {
+   475→    window.print()
+   476→  }
+   477→
+   478→  return (
+   479→    <div className="p-3 sm:p-6 space-y-4 sm:space-y-6 print-area">
+   480→      {/* Print Header - hidden on screen, visible when printing */}
+   481→      <PrintHeader
+   482→        title="RailOpt AI — Block Planning Report"
+   483→        corridor="Delhi–Howrah & Delhi–Mumbai"
+   484→        planName="All Plans"
+   485→      />
+   486→      {/* Header */}
+   487→      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+   488→        <div>
+   489→          <h1 className="text-xl sm:text-2xl font-bold text-foreground">Plans</h1>
+   490→          <p className="text-sm text-muted-foreground mt-1">Weekly and monthly maintenance block plans</p>
+   491→        </div>
+   492→        <div className="flex items-center gap-2 flex-wrap">
+   493→          {/* Compare toggle */}
+   494→          <div className="flex items-center gap-2 mr-1 px-2 py-1 rounded-md border border-border bg-muted/30">
+   495→            <GitCompare className="h-3.5 w-3.5 text-muted-foreground" />
+   496→            <span className="text-xs text-muted-foreground hidden sm:inline">Compare</span>
+   497→            <Switch
+   498→              checked={compareMode}
+   499→              onCheckedChange={setCompareMode}
+   500→              className="scale-75 origin-left"
+   501→            />
+   502→          </div>
+   503→          <DropdownMenu>
+   504→            <DropdownMenuTrigger asChild>
+   505→              <Button variant="secondary" size="sm" className="h-9 min-h-[44px] sm:h-auto"><FileText className="h-4 w-4 mr-1" />Export</Button>
+   506→            </DropdownMenuTrigger>
+   507→            <DropdownMenuContent align="end">
+   508→              <DropdownMenuItem onClick={exportAllPlansAsJSON}>
+   509→                <Download className="h-3.5 w-3.5 mr-2" /> All Plans (JSON)
+   510→              </DropdownMenuItem>
+   511→              <DropdownMenuItem onClick={exportAllPlansAsCSV}>
+   512→                <FileText className="h-3.5 w-3.5 mr-2" /> All Plans (CSV)
+   513→              </DropdownMenuItem>
+   514→            </DropdownMenuContent>
+   515→          </DropdownMenu>
+   516→          <Button size="sm" className="h-9 min-h-[44px] sm:h-auto gap-1" onClick={openCreateDialog}>
+   517→            <Plus className="h-3.5 w-3.5" />
+   518→            New Plan
+   519→          </Button>
+   520→          {/* Print button */}
+   521→          <Button variant="outline" size="sm" className="h-9 min-h-[44px] sm:h-auto gap-1" onClick={handlePrint}>
+   522→            <Printer className="h-3.5 w-3.5" />
+   523→            <span className="hidden sm:inline">Print Report</span>
+   524→            <span className="sm:hidden">Print</span>
+   525→          </Button>
+   526→        </div>
+   527→      </motion.div>
+   528→
+   529→      {/* Portfolio stats strip */}
+   530→      <motion.div
+   531→        initial={{ opacity: 0, y: 8 }}
+   532→        animate={{ opacity: 1, y: 0 }}
+   533→        transition={{ duration: 0.25, delay: 0.05 }}
+   534→        className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3"
+   535→      >
+   536→        {([
+   537→          { icon: FileText, label: 'Plans', value: String(stats.plans), tint: 'text-[#0d47a1] dark:text-[#9fa8da]', ring: 'border-[#9fa8da]/40' },
+   538→          { icon: Boxes, label: 'Blocks Planned', value: String(stats.blocks), tint: 'text-violet-600 dark:text-violet-400', ring: 'border-violet-300/40' },
+   539→          { icon: Clock, label: 'Engineer Hours', value: `${stats.hours}h`, tint: 'text-amber-600 dark:text-amber-400', ring: 'border-amber-300/40' },
+   540→          { icon: Bot, label: 'AI Recommended', value: `${stats.aiPct}%`, tint: 'text-emerald-600 dark:text-emerald-400', ring: 'border-emerald-300/40' },
+   541→        ] as const).map((s) => (
+   542→          <div key={s.label} className={`flex items-center gap-2.5 rounded-xl border ${s.ring} bg-card/60 px-3 py-2.5 shadow-sm`}>
+   543→            <div className={`flex items-center justify-center w-8 h-8 rounded-lg bg-muted/60 shrink-0`}>
+   544→              <s.icon className={`h-4 w-4 ${s.tint}`} />
+   545→            </div>
+   546→            <div className="min-w-0">
+   547→              <p className="text-lg font-bold leading-none text-foreground tabular-nums">{s.value}</p>
+   548→              <p className="text-[10px] text-muted-foreground mt-1 truncate">{s.label}</p>
+   549→            </div>
+   550→          </div>
+   551→        ))}
+   552→      </motion.div>
+   553→
+   554→      {/* Comparison Table (shown when compare mode is on) */}
+   555→      <AnimatePresence>
+   556→        {compareMode && (
+   557→          <motion.div
+   558→            key="comparison"
+   559→            initial={{ opacity: 0, height: 0 }}
+   560→            animate={{ opacity: 1, height: 'auto' }}
+   561→            exit={{ opacity: 0, height: 0 }}
+   562→            transition={{ duration: 0.3 }}
+   563→          >
+   564→            <PlanComparisonTable />
+   565→          </motion.div>
+   566→        )}
+   567→      </AnimatePresence>
+   568→
+   569→      {/* Plans List */}
+   570→      <div className="space-y-4">
+   571→        {allPlans.length === 0 ? (
+   572→          <EmptyState
+   573→            icon={FileText}
+   574→            title="No plans created yet"
+   575→            description="Create your first block plan to start optimizing maintenance schedules."
+   576→          />
+   577→        ) : null}
+   578→        {allPlans.map((plan, planIdx) => {
+   579→          const isCustomPlan = (plan as CustomPlan).isCustom === true
+   580→          const planBlocks = blocks.filter((b) => plan.blockIds.includes(b.id))
+   581→          const planRequests = maintenanceRequests.filter((mr) => planBlocks.some((b) => b.maintenanceReqIds.includes(mr.id)))
+   582→          const stepIndex = getStepIndex(plan.status)
+   583→          const totalDuration = planBlocks.reduce((sum, b) => sum + b.duration, 0)
+   584→          const healthScore = planHealthScores[plan.id] ?? (planBlocks.length > 0 ? Math.min(90, 40 + planBlocks.length * 10) : 25)
+   585→          const optimizedAt = lastOptimized[plan.id]
+   586→
+   587→          return (
+   588→            <Card key={plan.id} className={`overflow-hidden print-keep print-card transition-all duration-200 hover:shadow-md hover:-translate-y-0.5 ${planIdx > 0 ? 'print-break-before' : ''}`} data-card>
+   589→              <CardHeader className="pb-3">
+   590→                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2">
+   591→                  <div className="flex items-center gap-3">
+   592→                    <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+   593→                      <Calendar className="h-5 w-5 text-primary" />
+   594→                    </div>
+   595→                    <div className="min-w-0">
+   596→                      <div className="flex items-center gap-2">
+   597→                        <CardTitle className="text-base truncate">{plan.name}</CardTitle>
+   598→                        {/* Health Score Circular Indicator */}
+   599→                        <CircularProgress value={healthScore} size={32} strokeWidth={2.5} />
+   600→                      </div>
+   601→                      <CardDescription className="text-xs mt-0.5">
+   602→                        Version {plan.version} · Created by {plan.createdBy === 'planner-rk' ? 'Jeet' : plan.createdBy}
+   603→                      </CardDescription>
+   604→                    </div>
+   605→                  </div>
+   606→                  <div className="flex items-center gap-2 shrink-0">
+   607→                    {isCustomPlan && (
+   608→                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-5 bg-[#fff7ed] text-[#c2570b] border-[#fdba74] dark:bg-orange-950/30 dark:text-orange-400 dark:border-orange-800">
+   609→                        <CalendarPlus className="h-2.5 w-2.5 mr-0.5" />
+   610→                        Custom
+   611→                      </Badge>
+   612→                    )}
+   613→                    <Badge variant="outline" className={statusColors[plan.status]}>{statusLabels[plan.status]}</Badge>
+   614→                    <Badge variant="outline" className="text-xs">{plan.type === 'weekly' ? 'Weekly' : 'Monthly'}</Badge>
+   615→                    {isCustomPlan && (
+   616→                      <Button
+   617→                        variant="ghost"
+   618→                        size="icon"
+   619→                        className="h-7 w-7 text-muted-foreground hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
+   620→                        aria-label={`Delete plan ${plan.name}`}
+   621→                        onClick={() => setDeletePlanId(plan.id)}
+   622→                      >
+   623→                        <Trash2 className="h-3.5 w-3.5" />
+   624→                      </Button>
+   625→                    )}
+   626→                  </div>
+   627→                </div>
+   628→              </CardHeader>
+   629→
+   630→              <CardContent className="space-y-4">
+   631→                {/* Plan metadata - 2 cols on mobile */}
+   632→                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 text-sm">
+   633→                  <div className="flex items-center gap-2">
+   634→                    <Calendar className="h-4 w-4 text-muted-foreground shrink-0" />
+   635→                    <div className="min-w-0"><p className="text-xs text-muted-foreground">Period</p><p className="font-medium text-xs sm:text-sm truncate">{plan.startDate} — {plan.endDate}</p></div>
+   636→                  </div>
+   637→                  <div className="flex items-center gap-2">
+   638→                    <GitBranch className="h-4 w-4 text-muted-foreground shrink-0" />
+   639→                    <div><p className="text-xs text-muted-foreground">Blocks</p><p className="font-medium">{planBlocks.length} blocks</p></div>
+   640→                  </div>
+   641→                  <div className="flex items-center gap-2">
+   642→                    <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+   643→                    <div><p className="text-xs text-muted-foreground">Requests</p><p className="font-medium">{planRequests.length} requests</p></div>
+   644→                  </div>
+   645→                  <div className="flex items-center gap-2">
+   646→                    <Clock className="h-4 w-4 text-muted-foreground shrink-0" />
+   647→                    <div><p className="text-xs text-muted-foreground">Duration</p><p className="font-medium">{Math.round(totalDuration / 60)}h {totalDuration % 60}m</p></div>
+   648→                  </div>
+   649→                </div>
+   650→
+   651→                {/* Health Score Bar + Last Optimized */}
+   652→                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2.5 rounded-md bg-muted/30 border border-border/50">
+   653→                  <div className="flex items-center gap-2">
+   654→                    <Sparkles className="h-3.5 w-3.5 text-muted-foreground" />
+   655→                    <span className="text-xs text-muted-foreground">Health Score:</span>
+   656→                    <div className="flex items-center gap-2">
+   657→                      <div className="w-24 h-1.5 rounded-full bg-muted overflow-hidden">
+   658→                        <div
+   659→                          className={`h-full rounded-full transition-all duration-700 ${healthScore >= 80 ? 'bg-emerald-500' : healthScore >= 60 ? 'bg-amber-500' : 'bg-red-500'}`}
+   660→                          style={{ width: `${healthScore}%` }}
+   661→                        />
+   662→                      </div>
+   663→                      <span className={`text-xs font-semibold tabular-nums ${healthScore >= 80 ? 'text-emerald-600 dark:text-emerald-400' : healthScore >= 60 ? 'text-amber-600 dark:text-amber-400' : 'text-red-600 dark:text-red-400'}`}>
+   664→                        {healthScore}/100
+   665→                      </span>
+   666→                    </div>
+   667→                  </div>
+   668→                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+   669→                    <Clock className="h-3 w-3" />
+   670→                    <span>Last optimized: {optimizedAt ? new Date(optimizedAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : 'Never'}</span>
+   671→                  </div>
+   672→                </div>
+   673→
+   674→                {/* Workflow Stepper - vertical on mobile */}
+   675→                <div>
+   676→                  <p className="text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wider">Approval Workflow</p>
+   677→                  {isMobile ? (
+   678→                    /* Vertical stepper */
+   679→                    <div className="flex flex-col items-start gap-0 ml-1">
+   680→                      {workflowSteps.map((step, idx) => (
+   681→                        <div key={step} className="flex items-center gap-2">
+   682→                          {idx > 0 && (
+   683→                            <div className={`w-1 h-3 ml-[11px] rounded-full ${idx - 1 < stepIndex ? 'bg-success' : 'bg-border'}`} />
+   684→                          )}
+   685→                          <div className="flex items-center gap-2">
+   686→                            <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium shrink-0 ${idx < stepIndex ? 'bg-success text-white' : idx === stepIndex ? 'bg-primary text-white' : 'bg-muted text-muted-foreground'}`}>
+   687→                              {idx < stepIndex ? <CheckCircle2 className="h-3.5 w-3.5" /> : idx + 1}
+   688→                            </div>
+   689→                            <span className={`text-[11px] ${idx <= stepIndex ? 'text-foreground font-medium' : 'text-muted-foreground'}`}>{step}</span>
+   690→                          </div>
+   691→                        </div>
+   692→                      ))}
+   693→                    </div>
+   694→                  ) : (
+   695→                    /* Horizontal stepper */
+   696→                    <div className="flex items-center gap-1">
+   697→                      {workflowSteps.map((step, idx) => (
+   698→                        <div key={step} className="flex items-center gap-1 flex-1">
+   699→                          <div className="flex flex-col items-center flex-1">
+   700→                            <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium ${idx < stepIndex ? 'bg-success text-white' : idx === stepIndex ? 'bg-primary text-white' : 'bg-muted text-muted-foreground'}`}>
+   701→                              {idx < stepIndex ? <CheckCircle2 className="h-3.5 w-3.5" /> : idx + 1}
+   702→                            </div>
+   703→                            <span className={`text-[10px] mt-1 text-center leading-tight ${idx <= stepIndex ? 'text-foreground font-medium' : 'text-muted-foreground'}`}>{step}</span>
+   704→                          </div>
+   705→                          {idx < workflowSteps.length - 1 && (
+   706→                            <div className={`h-0.5 flex-1 min-w-4 -mt-3 ${idx < stepIndex ? 'bg-success' : 'bg-border'}`} />
+   707→                          )}
+   708→                        </div>
+   709→                      ))}
+   710→                    </div>
+   711→                  )}
+   712→                </div>
+   713→
+   714→                <Separator />
+   715→
+   716→                {/* Blocks in this plan - compact on mobile */}
+   717→                {planBlocks.length > 0 && (
+   718→                  <div>
+   719→                    <p className="text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wider">Blocks in Plan</p>
+   720→                    <div className="space-y-1.5">
+   721→                      {planBlocks.map((block) => (
+   722→                        <div
+   723→                          key={block.id}
+   724→                          role="button"
+   725→                          tabIndex={0}
+   726→                          className="flex items-center justify-between p-2 rounded-md bg-muted/50 hover:bg-muted cursor-pointer transition-colors"
+   727→                          onClick={() => { toast.info(`Opening "${block.name}" in Planning`, { description: block.section }); setActiveView('planning') }}
+   728→                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { toast.info(`Opening "${block.name}" in Planning`, { description: block.section }); setActiveView('planning') } }}
+   729→                        >
+   730→                          <div className="flex items-center gap-2 min-w-0">
+   731→                            <div className={`w-2 h-2 rounded-full shrink-0 ${block.department === 'engineering' ? 'bg-primary' : block.department === 'snt' ? 'bg-info' : block.department === 'traction' ? 'bg-warning' : 'bg-violet-500'}`} />
+   732→                            <span className="text-sm font-medium truncate">{block.name}</span>
+   733→                            {block.isAiRecommended && (
+   734→                              <Badge variant="outline" className="text-[10px] px-1 py-0 text-info border-info/30 shrink-0">AI</Badge>
+   735→                            )}
+   736→                          </div>
+   737→                          <div className="flex items-center gap-2 shrink-0">
+   738→                            <span className="text-xs text-muted-foreground font-mono hidden sm:inline">
+   739→                              {new Date(block.startTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })}—
+   740→                              {new Date(block.endTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })}
+   741→                            </span>
+   742→                            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+   743→                          </div>
+   744→                        </div>
+   745→                      ))}
+   746→                    </div>
+   747→                  </div>
+   748→                )}
+   749→
+   750→                {planBlocks.length === 0 && (
+   751→                  <div className="flex items-center gap-2 p-4 rounded-md bg-muted/50 text-sm text-muted-foreground">
+   752→                    <AlertCircle className="h-4 w-4" />
+   753→                    No blocks assigned yet. Run AI optimization to generate recommendations.
+   754→                  </div>
+   755→                )}
+   756→
+   757→                {/* Actions - wrap on mobile */}
+   758→                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2">
+   759→                  <div className="text-xs text-muted-foreground">
+   760→                    Last updated: {new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+   761→                  </div>
+   762→                  <div className="flex flex-wrap items-center gap-1.5">
+   763→                    <Button variant="ghost" size="sm" className="text-xs h-8 min-h-[44px] sm:h-7 gap-1" onClick={() => exportPlanAsJSON(plan, planBlocks, planRequests)}>
+   764→                      <Download className="h-3 w-3" /> JSON
+   765→                    </Button>
+   766→                    <Button variant="ghost" size="sm" className="text-xs h-8 min-h-[44px] sm:h-7 gap-1" onClick={() => exportPlanAsCSV(plan, planBlocks)}>
+   767→                      <FileText className="h-3 w-3" /> CSV
+   768→                    </Button>
+   769→                    <Button variant="outline" size="sm" className="text-xs h-8 min-h-[44px] sm:h-7 gap-1 border-[#9fa8da] text-[#0d47a1] hover:bg-[#e8eaf6] hover:text-[#1a237e] dark:border-[#1a237e] dark:text-[#3f51b5] dark:hover:bg-[#0d1442]/30" onClick={() => window.open(`/api/export/plan-pdf?planId=${plan.id}`, '_blank')}>
+   770→                      <FileDown className="h-3 w-3" /> PDF
+   771→                    </Button>
+   772→                    <Button variant="ghost" size="sm" className="text-xs h-8 min-h-[44px] sm:h-7 gap-1" onClick={() => sharePlan(plan, planBlocks)}>
+   773→                      <Share2 className="h-3 w-3" /> Share
+   774→                    </Button>
+   775→                    <Separator orientation="vertical" className="h-4 hidden sm:block" />
+   776→                    <Button variant="ghost" size="sm" className="text-xs h-8 min-h-[44px] sm:h-7 hidden sm:inline-flex" onClick={() => setActiveView('planning')}>Open in Planning</Button>
+   777→                    <Button variant="secondary" size="sm" className="h-8 min-h-[44px] sm:h-7" onClick={() => setExpandedPlanId(expandedPlanId === plan.id ? null : plan.id)}>
+   778→                      {expandedPlanId === plan.id ? 'Hide Details' : 'View Details'}
+   779→                    </Button>
+   780→                  </div>
+   781→                </div>
+   782→
+   783→                {/* Expanded details: maintenance requests in this plan */}
+   784→                <AnimatePresence>
+   785→                  {expandedPlanId === plan.id && (
+   786→                    <motion.div
+   787→                      initial={{ opacity: 0, height: 0 }}
+   788→                      animate={{ opacity: 1, height: 'auto' }}
+   789→                      exit={{ opacity: 0, height: 0 }}
+   790→                      transition={{ duration: 0.2 }}
+   791→                      className="overflow-hidden"
+   792→                    >
+   793→                      <div className="pt-2 space-y-2">
+   794→                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Requests Linked to This Plan</p>
+   795→                        {planRequests.length === 0 ? (
+   796→                          <p className="text-xs text-muted-foreground p-3 rounded-md bg-muted/40 border border-border/50">No maintenance requests linked yet.</p>
+   797→                        ) : (
+   798→                          <div className="space-y-1.5">
+   799→                            {planRequests.map((mr) => (
+   800→                              <div key={mr.id} className="flex items-center justify-between gap-2 p-2.5 rounded-md border border-border/60 bg-card">
+   801→                                <div className="min-w-0">
+   802→                                  <p className="text-xs font-medium truncate">{mr.title}</p>
+   803→                                  <p className="text-[10px] text-muted-foreground">{mr.department.toUpperCase()} · Severity: {mr.severity} · {mr.duration} min</p>
+   804→                                </div>
+   805→                                <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 shrink-0">P{Math.round(mr.priority)}</Badge>
+   806→                              </div>
+   807→                            ))}
+   808→                          </div>
+   809→                        )}
+   810→                      </div>
+   811→                    </motion.div>
+   812→                  )}
+   813→                </AnimatePresence>
+   814→              </CardContent>
+   815→            </Card>
+   816→          )
+   817→        })}
+   818→      </div>
+   819→
+   820→      {/* Summary */}
+   821→      <Card className="print-keep print-card" data-card>
+   822→        <CardContent className="p-4">
+   823→          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-sm">
+   824→            <span className="text-muted-foreground">{allPlans.length} plan{allPlans.length !== 1 ? 's' : ''} total{customPlans.length > 0 ? ` · ${customPlans.length} custom` : ''}</span>
+   825→            <div className="flex items-center gap-4 flex-wrap">
+   826→              <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-success" />{allPlans.filter((p) => p.status === 'approved').length} approved</span>
+   827→              <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-primary" />{allPlans.filter((p) => ['recommended', 'reviewed', 'verified', 'finalized'].includes(p.status)).length} in progress</span>
+   828→              <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-muted-foreground" />{allPlans.filter((p) => p.status === 'draft').length} draft</span>
+   829→            </div>
+   830→          </div>
+   831→        </CardContent>
+   832→      </Card>
+   833→
+   834→      {/* Create Plan Dialog */}
+   835→      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+   836→        <DialogContent className="sm:max-w-[440px]">
+   837→          <DialogHeader>
+   838→            <DialogTitle className="flex items-center gap-2 text-base">
+   839→              <CalendarPlus className="h-4 w-4 text-primary" />
+   840→              Create New Plan
+   841→            </DialogTitle>
+   842→            <DialogDescription className="text-xs">
+   843→              Define the planning window. Add blocks from the Planning view, then run AI optimization to fill this plan.
+   844→            </DialogDescription>
+   845→          </DialogHeader>
+   846→          <div className="space-y-3.5 py-1">
+   847→            <div className="space-y-1.5">
+   848→              <Label htmlFor="plan-name" className="text-xs font-medium">Plan Name <span className="text-red-500">*</span></Label>
+   849→              <Input
+   850→                id="plan-name"
+   851→                value={newPlanName}
+   852→                onChange={(e) => setNewPlanName(e.target.value)}
+   853→                placeholder="e.g. Weekly Block Plan — March Week 2"
+   854→                className="text-sm h-9"
+   855→              />
+   856→            </div>
+   857→            <div className="grid grid-cols-2 gap-3">
+   858→              <div className="space-y-1.5">
+   859→                <Label className="text-xs font-medium">Plan Type</Label>
+   860→                <Select value={newPlanType} onValueChange={(v) => setNewPlanType(v as 'weekly' | 'monthly')}>
+   861→                  <SelectTrigger className="text-xs h-9"><SelectValue /></SelectTrigger>
+   862→                  <SelectContent>
+   863→                    <SelectItem value="weekly">Weekly</SelectItem>
+   864→                    <SelectItem value="monthly">Monthly</SelectItem>
+   865→                  </SelectContent>
+   866→                </Select>
+   867→              </div>
+   868→              <div className="space-y-1.5">
+   869→                <Label className="text-xs font-medium">Created By</Label>
+   870→                <div className="flex items-center h-9 px-3 rounded-md border border-input bg-muted/40 text-xs text-muted-foreground truncate">
+   871→                  {currentUserName || 'You'}
+   872→                </div>
+   873→              </div>
+   874→            </div>
+   875→            <div className="grid grid-cols-2 gap-3">
+   876→              <div className="space-y-1.5">
+   877→                <Label htmlFor="plan-start" className="text-xs font-medium">Start Date <span className="text-red-500">*</span></Label>
+   878→                <Input id="plan-start" type="date" value={newPlanStart} onChange={(e) => setNewPlanStart(e.target.value)} className="text-sm h-9" />
+   879→              </div>
+   880→              <div className="space-y-1.5">
+   881→                <Label htmlFor="plan-end" className="text-xs font-medium">End Date <span className="text-red-500">*</span></Label>
+   882→                <Input id="plan-end" type="date" value={newPlanEnd} onChange={(e) => setNewPlanEnd(e.target.value)} className="text-sm h-9" />
+   883→              </div>
+   884→            </div>
+   885→            <div className="space-y-1.5">
+   886→              <Label htmlFor="plan-notes" className="text-xs font-medium">Notes (optional)</Label>
+   887→              <Input
+   888→                id="plan-notes"
+   889→                value={newPlanNotes}
+   890→                onChange={(e) => setNewPlanNotes(e.target.value)}
+   891→                placeholder="e.g. Prioritise NDLS-GZB track renewal blocks"
+   892→                className="text-sm h-9"
+   893→              />
+   894→            </div>
+   895→          </div>
+   896→          <DialogFooter className="gap-2">
+   897→            <Button variant="outline" size="sm" onClick={() => setCreateOpen(false)}>Cancel</Button>
+   898→            <Button size="sm" onClick={handleCreatePlan} className="gap-1.5">
+   899→              <Plus className="h-3.5 w-3.5" />
+   900→              Create Plan
+   901→            </Button>
+   902→          </DialogFooter>
+   903→        </DialogContent>
+   904→      </Dialog>
+   905→
+   906→      {/* Delete Custom Plan Confirmation */}
+   907→      <AlertDialog open={!!deletePlanId} onOpenChange={(open) => { if (!open) setDeletePlanId(null) }}>
+   908→        <AlertDialogContent>
+   909→          <AlertDialogHeader>
+   910→            <AlertDialogTitle className="text-base">Delete this plan?</AlertDialogTitle>
+   911→            <AlertDialogDescription className="text-xs">
+   912→              "
+   913→              {customPlans.find((p) => p.id === deletePlanId)?.name}
+   914→              " will be permanently removed from this device. This action cannot be undone.
+   915→            </AlertDialogDescription>
+   916→          </AlertDialogHeader>
+   917→          <AlertDialogFooter>
+   918→            <AlertDialogCancel className="h-8 text-xs">Cancel</AlertDialogCancel>
+   919→            <AlertDialogAction className="h-8 text-xs bg-red-600 hover:bg-red-700 text-white" onClick={handleDeletePlan}>
+   920→              Delete Plan
+   921→            </AlertDialogAction>
+   922→          </AlertDialogFooter>
+   923→        </AlertDialogContent>
+   924→      </AlertDialog>
+   925→    </div>
+   926→  )
+   927→}
+   928→
