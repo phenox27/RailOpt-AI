@@ -2274,3 +2274,49 @@ Stage Summary:
 - All buttons functional; team names untouched; no new dependencies
 - Unresolved/risks: (1) OOM discipline — setsid + Chrome closed for lint/recompile; (2) train-section mapping is corridor-wide by design (all 7 trains treated as corridor traffic — fine for the demo, would need per-section timetables in production); (3) utilization buckets count minutes summed across overlapping blocks (peak can exceed 100% — labeled "competing", intended); (4) dragPreview state resets on view switch (by design); (5) overnight train prev-day logic assumes blocks never wrap past 24h (guaranteed by clamp)
 - Next round suggestions: (1) audit view server-side action filter pushdown (?action= param, carried over from cron-review-6); (2) utilization panel click-to-jump: click an hour bucket to jump timeline selection to that hour's first block; (3) "next departures" ticker (trainsDepartingWithin helper already in lib, unused); (4) optimization results could write AI-recommended block slots back through the same reschedule pipeline for audit parity; (5) per-section utilization selector (panel currently aggregates all plan blocks on the day)
+---
+Task ID: cron-review-8
+Agent: main (Z.ai Code, webDevReview cron)
+Task: QA pass + utilization click-to-jump + Next Departures (compact rail ticker + station-style dashboard board) + audit action-filter server pushdown (closes cron-review-7 suggestions #1, #2, #3)
+
+Work Log:
+- QA baseline: all 8 admin views swept via agent-browser — 0 console errors/warnings; server all 200s; team accounts intact (fresh-profile login screen shows exactly Dhittika/Jeet/Diya/Debarshi/Rupam/Alivia on Quick Demo Access, no random names). Dev server confirmed running via the setsid recipe; single instance.
+
+- NEW FEATURE A — Utilization panel click-to-jump (closes suggestion #2):
+  * corridor-utilization.tsx: hour buckets become real <button>s when onHourClick provided (cursor-pointer, focus-visible saffron ring, hover brightness, aria-label "Inspect blocks scheduled at HH:00", tooltip gains "· click to inspect"); buckets render plain divs while dragging (no click during drag)
+  * New props: onHourClick(hour), dayLabel (chip "MON 27 JAN" in the header next to "24h · 1h buckets"), selectedHour (saffron glowing underline under the selected block's hour bucket)
+  * planning-view handleHourJump: picks the first block STARTING in the hour, falls back to first block COVERING the hour; selects it (opens mobile sheet) + success toast "Inspecting <name> · Starts at HH:MM"; empty hour → info toast "HH:00–HH:00 is free — good candidate slot for new maintenance work"
+  * Empty-state hint text updated: "Click a block in the timeline — or an hour in the utilization chart"
+  * VERIFIED: 01:00 click → Block A1 selected + toast + underline; 10:00 click → "10:00–11:00 is free" info toast; 0 console errors
+
+- NEW FEATURE B — Next Departures board (new next-departures.tsx, closes suggestion #3):
+  * Uses the previously-unused trainsDepartingWithin helper — and FIXED it first: old version missed trains whose next departure is tomorrow morning when the window crosses midnight (23:00 now, 01:30 train tomorrow); new logic recurs any departed train at startH+24
+  * Two variants: 'compact' (right rail under Corridor Utilization in all three states: selected/empty/mobile Sheet) and 'board' (station-style full-width strip on the Dashboard after the Charts row)
+  * Live behavior: real wall-clock time, 30s refresh, trains departing ≤3h with countdown chips ("in 2h 44m"); urgency colors (≤15m red pulse / ≤45m amber / else emerald); honours daysOfRun (non-running day → "no service" chip); +1d badge for post-midnight departures; quiet-window fallback always shows the next scheduled service (prefers one that actually runs) so the board is never empty
+  * 'board' variant: amber gradient station header "DEPARTURE BOARD · निर्गमन" with black clock chip, TIME/TRAIN·ROUTE/STATUS column headers, larger type — classic Indian Railway platform-board look
+  * VERIFIED: rail board shows Duronto 12260 "in 2h 44m" at 17:56; dashboard board renders with header/columns; both themes OK
+
+- NEW FEATURE C — Audit action-filter server pushdown (closes suggestion #1, carried from cron-review-6):
+  * audit-view fetchPage now appends &action=<filter> (encoded) whenever actionFilter ≠ all; server WHERE clause narrows rows AND total (API already supported it — the view never sent it)
+  * Ref-based (actionFilterRef) so the 20s poll/visibility refreshes and load-more inherit the active filter; new effect re-fetches page 0 on filter change
+  * knownActions state = union of simulated + every live action ever seen; the dropdown keeps ALL options while a filter narrows fetched rows (verified: 14 options with BLOCK_RESCHEDULED active)
+  * LIVE badge reads "N filtered" when pushdown active, "N server" otherwise
+  * VERIFIED: dev.log shows GET /api/audit?limit=50&offset=0&action=BLOCK_RESCHEDULED; badge 46 server → 31 filtered → back to 46 on All
+
+- BUG INVESTIGATION (false alarm): right-rail panels appeared light in dark-mode screenshots; computed styles + direct PNG pixel sampling proved correct dark values (utilization #0f141a, board #171d24) — it was preview-rendering brightness, not an app bug. Dark mode confirmed correct.
+
+- STYLING POLISH (mandatory): clickable bucket affordances + focus rings; selected-hour glow underline; day-label chip in the utilization header; two-variant departure board with urgency countdown chips and the amber station-board theme; updated empty-state copy
+
+Verification Results (agent-browser + dev.log + PNG pixel sampling):
+- All 8 views: 0 console errors/warnings after full reload; fresh-profile E2E: login screen roster exact → Dhittika sign-in → full sweep clean
+- Feature A: block-hour click select + toasts + underline ✓; free-hour toast ✓
+- Feature B: rail compact board ✓ (countdown live), dashboard board ✓ (variant=board in DOM + screenshot), quiet fallback ✓ (single next-service row)
+- Feature C: server-side action pushdown in access log ✓, filtered totals ✓, dropdown integrity ✓, reset ✓
+- bun run lint: 0 errors 0 warnings (browser closed during lint — OOM discipline held)
+- Artifacts: download/next-departures-panel.png, download/dashboard-departure-board2.png, download/hour-jump-01.png, download/selected-hour-indicator.png, download/next-departures-dark3.png
+
+Stage Summary:
+- Shipped the three top suggestions from cron-review-7: utilization click-to-jump, Next Departures (rail ticker + station board), audit action-filter pushdown — plus a real trainsDepartingWithin correctness fix (midnight-crossing windows)
+- All buttons functional; team names untouched; no new dependencies
+- Unresolved/risks: (1) OOM discipline still required (setsid dev server, browser closed for lint); (2) departure board uses the real wall clock while the plan timeline is simulated Jan 2025 — intentional (board reflects "live operations"), but the board does not react to the plan's selected day; (3) daysOfRun filtering uses the real weekday — weekend demos may show more "no service" chips than weekday demos; (4) agent-browser snapshot refs go stale after HMR re-renders — click a fresh snapshot's refs (two false alarms this round came from stale refs, both disproven by direct JS eval)
+- Next round suggestions: (1) per-section utilization selector on the Corridor Utilization panel (carried over); (2) departure board aware of the plan-selected day (simulate clock at selectedDate so the board matches the timeline being planned); (3) click a departure-board row → deep-link into Timetable view with that train focused; (4) audit view: entity-type/user filter pushdown parity with the action param; (5) make the free-hour toast actionable — "Create block here" button pre-filling ManualBlockForm with that start hour

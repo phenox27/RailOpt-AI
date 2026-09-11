@@ -28,6 +28,12 @@ interface CorridorUtilizationProps {
   preview: DragPreviewInfo | null
   /** Currently selected block — shows a train-path cross-check for its window */
   selectedBlock?: SimBlock | null
+  /** Click an hour bucket → jump timeline selection to that hour's first block */
+  onHourClick?: (hour: number) => void
+  /** Label of the day being charted, e.g. "Mon 27 Jan" (shown in the header) */
+  dayLabel?: string
+  /** Hour of the currently selected block's start (highlights its bucket) */
+  selectedHour?: number | null
   className?: string
 }
 
@@ -119,7 +125,7 @@ function utilizationColor(minutes: number, overbooked: boolean): string {
  * Live-updates during drag rescheduling: the dragged block's original slot is
  * removed and its proposed slot is drawn in, showing freed/reused capacity.
  */
-export function CorridorUtilization({ dayBlocks, preview, selectedBlock, className }: CorridorUtilizationProps) {
+export function CorridorUtilization({ dayBlocks, preview, selectedBlock, onHourClick, dayLabel, selectedHour, className }: CorridorUtilizationProps) {
   const buckets = useMemo(() => computeBuckets(dayBlocks, preview), [dayBlocks, preview])
   const freeWindow = useMemo(() => findLongestFreeWindow(buckets), [buckets])
 
@@ -172,7 +178,14 @@ export function CorridorUtilization({ dayBlocks, preview, selectedBlock, classNa
             Previewing {formatH(preview.startH)}–{formatH(preview.startH + preview.durationH)}
           </Badge>
         ) : (
-          <span className="text-[9px] text-muted-foreground font-mono">24h · 1h buckets</span>
+          <span className="flex items-center gap-1.5">
+            {dayLabel && (
+              <span className="text-[9px] font-semibold text-foreground/70 bg-muted/70 border border-border/60 rounded px-1 py-px uppercase tracking-wide">
+                {dayLabel}
+              </span>
+            )}
+            <span className="text-[9px] text-muted-foreground font-mono">24h · 1h buckets</span>
+          </span>
         )}
       </div>
 
@@ -182,23 +195,47 @@ export function CorridorUtilization({ dayBlocks, preview, selectedBlock, classNa
           {buckets.map((b) => {
             const heightPct = b.minutes <= 0 ? 3 : Math.max(6, (b.minutes / 120) * 100)
             const inPreview = preview && b.hour + 1 > preview.startH && b.hour < preview.startH + preview.durationH
+            const isSelected = selectedHour != null && b.hour === selectedHour
+            const clickable = !!onHourClick && !preview
+            const Bar = (
+              <div
+                className={cn(
+                  'w-full rounded-t-sm transition-all duration-200',
+                  utilizationColor(b.minutes, b.overbooked),
+                  inPreview && previewConflicted && 'ring-1 ring-red-500/70',
+                  inPreview && !previewConflicted && 'ring-1 ring-[#FF9933]/80',
+                  clickable && !isSelected && 'group-hover/u:brightness-110',
+                )}
+                style={{ height: `${heightPct}%` }}
+              />
+            )
             return (
               <div key={b.hour} className="flex-1 h-full flex flex-col justify-end relative group/u">
-                <div
-                  className={cn(
-                    'w-full rounded-t-sm transition-all duration-200',
-                    utilizationColor(b.minutes, b.overbooked),
-                    inPreview && previewConflicted && 'ring-1 ring-red-500/70',
-                    inPreview && !previewConflicted && 'ring-1 ring-[#FF9933]/80',
-                  )}
-                  style={{ height: `${heightPct}%` }}
-                />
+                {clickable ? (
+                  <button
+                    type="button"
+                    onClick={() => onHourClick?.(b.hour)}
+                    className="w-full h-full flex flex-col justify-end rounded-t-sm outline-none focus-visible:ring-2 focus-visible:ring-[#FF9933] focus-visible:ring-offset-1 cursor-pointer"
+                    aria-label={`Inspect blocks scheduled at ${b.hour.toString().padStart(2, '0')}:00`}
+                    title={`Jump to ${b.hour.toString().padStart(2, '0')}:00`}
+                  >
+                    {Bar}
+                  </button>
+                ) : (
+                  Bar
+                )}
                 {b.overbooked && (
                   <span className="absolute -top-0.5 left-1/2 -translate-x-1/2 h-1 w-1 rounded-full bg-red-500" aria-hidden="true" />
                 )}
+                {isSelected && (
+                  <span
+                    className="absolute inset-x-0 -bottom-1 h-0.5 rounded-full bg-[#FF9933] shadow-[0_0_6px_rgba(255,153,51,0.8)]"
+                    aria-hidden="true"
+                  />
+                )}
                 {/* Hover tooltip */}
                 <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover/u:block whitespace-nowrap rounded bg-foreground text-background text-[9px] font-mono px-1.5 py-0.5 shadow z-20">
-                  {b.hour.toString().padStart(2, '0')}:00 · {Math.round(Math.min(b.minutes, 120))}m{b.overbooked ? ' · competing' : ''}
+                  {b.hour.toString().padStart(2, '0')}:00 · {Math.round(Math.min(b.minutes, 120))}m{b.overbooked ? ' · competing' : ''}{clickable ? ' · click to inspect' : ''}
                 </span>
               </div>
             )

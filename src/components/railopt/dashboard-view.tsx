@@ -24,6 +24,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { Separator } from '@/components/ui/separator'
+import { NextDepartures } from './next-departures'
 import {
   ClipboardList,
   Clock,
@@ -442,6 +443,15 @@ export function DashboardView() {
           <WeatherAlert />
         </motion.div>
       </div>
+
+      {/* Corridor Departure Board — station-style strip (uses real clock time) */}
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.2, delay: 0.23 }}
+      >
+        <NextDepartures variant="board" />
+      </motion.div>
 
       <Separator />
 

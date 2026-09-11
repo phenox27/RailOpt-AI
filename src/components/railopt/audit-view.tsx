@@ -92,6 +92,11 @@ export function AuditView() {
   const [loadingMore, setLoadingMore] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null)
+  // Union of every action ever seen (simulated + live) — stays stable while a
+  // server-side action filter narrows the fetched rows, so the dropdown keeps
+  // offering all options.
+  const [knownActions, setKnownActions] = useState<string[]>(() => [...new Set(auditEntries.map(e => e.action))])
+  const actionFilterRef = useRef<ActionFilter>(actionFilter)
   const loadingMoreRef = useRef(false)
 
   const PAGE_SIZE = 50
@@ -104,7 +109,8 @@ export function AuditView() {
     if (mode === 'replace') setRefreshing(true)
     else setLoadingMore(true)
     try {
-      const res = await fetch(`/api/audit?limit=${PAGE_SIZE}&offset=${offset}`, { cache: 'no-store' })
+      const actionParam = actionFilterRef.current !== 'all' ? `&action=${encodeURIComponent(actionFilterRef.current)}` : ''
+      const res = await fetch(`/api/audit?limit=${PAGE_SIZE}&offset=${offset}${actionParam}`, { cache: 'no-store' })
       if (!res.ok) {
         setLiveStatus((s) => (s === 'connected' ? s : 'unavailable'))
         return
@@ -113,6 +119,14 @@ export function AuditView() {
       const rows: DbAuditEntry[] = Array.isArray(json?.data) ? json.data : []
       const pagination = json?.pagination as { total?: number; hasMore?: boolean } | undefined
       const mapped = rows.map(mapDbEntry)
+      // Accumulate the action list so the filter dropdown never shrinks
+      if (mapped.length > 0) {
+        setKnownActions((prev) => {
+          const s = new Set(prev)
+          mapped.forEach((e) => s.add(e.action))
+          return s.size === prev.length ? prev : [...s]
+        })
+      }
       if (mode === 'replace') {
         setLiveEntries(mapped)
       } else {
@@ -140,6 +154,14 @@ export function AuditView() {
     return () => clearTimeout(t)
   }, [fetchPage])
 
+  // Server-side action filter pushdown: re-fetch the live page when the action filter changes
+  useEffect(() => {
+    if (actionFilterRef.current === actionFilter) return
+    actionFilterRef.current = actionFilter
+    const t = setTimeout(() => void fetchPage(0, 'replace'), 0)
+    return () => clearTimeout(t)
+  }, [actionFilter, fetchPage])
+
   // Live tail: poll for new entries every 20s and refresh when the tab regains focus
   useEffect(() => {
     if (liveStatus !== 'connected') return
@@ -160,7 +182,7 @@ export function AuditView() {
     return [...liveEntries, ...auditEntries]
   }, [liveEntries])
 
-  const uniqueActions = useMemo(() => [...new Set(allEntries.map(e => e.action))], [allEntries])
+  const uniqueActions = knownActions
   const uniqueEntityTypes = useMemo(() => [...new Set(allEntries.map(e => e.entityType))], [allEntries])
   const uniqueUsers = useMemo(() => [...new Set(allEntries.map(e => e.userName))], [allEntries])
 
@@ -257,7 +279,7 @@ export function AuditView() {
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-500 opacity-60" />
                     <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
                   </span>
-                  LIVE · {liveTotal} server
+                  LIVE · {actionFilter !== 'all' ? `${liveTotal} filtered` : `${liveTotal} server`}
                 </Badge>
               )}
               {dateRange && (

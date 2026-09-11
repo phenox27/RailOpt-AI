@@ -1,0 +1,571 @@
+     1→'use client'
+     2→
+     3→import { useMemo, useState, useCallback, useEffect, useRef } from 'react'
+     4→import { motion, AnimatePresence } from 'framer-motion'
+     5→import {
+     6→  Table,
+     7→  TableBody,
+     8→  TableCell,
+     9→  TableHead,
+    10→  TableHeader,
+    11→  TableRow,
+    12→} from '@/components/ui/table'
+    13→import { Badge } from '@/components/ui/badge'
+    14→import {
+    15→  Select,
+    16→  SelectContent,
+    17→  SelectItem,
+    18→  SelectTrigger,
+    19→  SelectValue,
+    20→} from '@/components/ui/select'
+    21→import { Input } from '@/components/ui/input'
+    22→import { Button } from '@/components/ui/button'
+    23→import { auditEntries, type SimAuditEntry } from '@/data/simulated-data'
+    24→import { ScrollText, Filter, ArrowUpDown, Search, Download, ChevronDown, ChevronRight, CalendarRange, Radio, RotateCw, Loader2 } from 'lucide-react'
+    25→import { format, parseISO } from 'date-fns'
+    26→import { EmptyState } from './empty-state'
+    27→
+    28→type ActionFilter = 'all' | string
+    29→type EntityTypeFilter = 'all' | string
+    30→type SortOrder = 'desc' | 'asc'
+    31→
+    32→/** Raw audit row returned by GET /api/audit (Prisma AuditLog include user). */
+    33→interface DbAuditEntry {
+    34→  id: string
+    35→  action: string
+    36→  entityType: string
+    37→  entityId: string | null
+    38→  userName: string | null
+    39→  details: string | null
+    40→  createdAt: string
+    41→  user?: { name?: string; email?: string } | null
+    42→}
+    43→
+    44→/** Merged view-model: simulated entries + live DB entries (tagged isLive). */
+    45→type MergedAuditEntry = SimAuditEntry & { isLive?: boolean }
+    46→
+    47→function mapDbEntry(e: DbAuditEntry): MergedAuditEntry {
+    48→  return {
+    49→    id: `db-${e.id}`,
+    50→    action: e.action,
+    51→    entityType: e.entityType,
+    52→    entityId: e.entityId ?? '—',
+    53→    userName: e.userName ?? e.user?.name ?? 'System',
+    54→    details: e.details ?? '(no details)',
+    55→    timestamp: e.createdAt,
+    56→    isLive: true,
+    57→  }
+    58→}
+    59→
+    60→const ACTION_BADGE: Record<string, string> = {
+    61→  RUN_OPTIMIZATION: 'bg-[#e8eaf6] text-[#0d47a1] border-[#9fa8da] dark:bg-[#1a237e]/30 dark:text-[#7986cb] dark:border-[#3f51b5]/50',
+    62→  CREATE_REQUEST: 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/30 dark:text-blue-400 dark:border-blue-800/50',
+    63→  PRIORITY_SCORED: 'bg-[#e8eaf6] text-[#0d47a1] border-[#9fa8da] dark:bg-[#1a237e]/30 dark:text-[#7986cb] dark:border-[#3f51b5]/50',
+    64→  BLOCK_RECOMMENDED: 'bg-[#e8eaf6] text-[#0d47a1] border-[#9fa8da] dark:bg-[#1a237e]/30 dark:text-[#7986cb] dark:border-[#3f51b5]/50',
+    65→  CONFLICT_DETECTED: 'bg-red-50 text-red-700 border-red-200 dark:bg-red-950/30 dark:text-red-400 dark:border-red-800/50',
+    66→  PLAN_REVIEWED: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-400 dark:border-emerald-800/50',
+    67→  // Live plan/block/user actions (saffron family = create, red = delete, neutral = update)
+    68→  CUSTOM_PLAN_CREATED: 'bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/30 dark:text-orange-400 dark:border-orange-800/50',
+    69→  CUSTOM_PLAN_UPDATED: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/30 dark:text-amber-400 dark:border-amber-800/50',
+    70→  CUSTOM_PLAN_DELETED: 'bg-red-50 text-red-700 border-red-200 dark:bg-red-950/30 dark:text-red-400 dark:border-red-800/50',
+    71→  BLOCK_ADDED_TO_PLAN: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-400 dark:border-emerald-800/50',
+    72→  BLOCK_REMOVED_FROM_PLAN: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/30 dark:text-amber-400 dark:border-amber-800/50',
+    73→  MANUAL_BLOCK_CREATED: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-400 dark:border-emerald-800/50',
+    74→  MANUAL_BLOCK_DELETED: 'bg-red-50 text-red-700 border-red-200 dark:bg-red-950/30 dark:text-red-400 dark:border-red-800/50',
+    75→  BLOCK_RESCHEDULED: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/30 dark:text-amber-400 dark:border-amber-800/50',
+    76→  USER_INVITED: 'bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-950/30 dark:text-violet-400 dark:border-violet-800/50',
+    77→  USER_UPDATED: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/30 dark:text-amber-400 dark:border-amber-800/50',
+    78→  USER_REMOVED: 'bg-red-50 text-red-700 border-red-200 dark:bg-red-950/30 dark:text-red-400 dark:border-red-800/50',
+    79→}
+    80→
+    81→export function AuditView() {
+    82→  const [actionFilter, setActionFilter] = useState<ActionFilter>('all')
+    83→  const [entityTypeFilter, setEntityTypeFilter] = useState<EntityTypeFilter>('all')
+    84→  const [userFilter, setUserFilter] = useState('all')
+    85→  const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
+    86→  const [searchQuery, setSearchQuery] = useState('')
+    87→  const [expandedRow, setExpandedRow] = useState<string | null>(null)
+    88→  const [liveEntries, setLiveEntries] = useState<MergedAuditEntry[]>([])
+    89→  const [liveStatus, setLiveStatus] = useState<'loading' | 'connected' | 'unavailable'>('loading')
+    90→  const [liveTotal, setLiveTotal] = useState(0)
+    91→  const [hasMore, setHasMore] = useState(false)
+    92→  const [loadingMore, setLoadingMore] = useState(false)
+    93→  const [refreshing, setRefreshing] = useState(false)
+    94→  const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null)
+    95→  const loadingMoreRef = useRef(false)
+    96→
+    97→  const PAGE_SIZE = 50
+    98→
+    99→  // Fetch one page of live audit rows. mode 'replace' refreshes the newest page,
+   100→  // 'append' loads the next page after what is already shown.
+   101→  const fetchPage = useCallback(async (offset: number, mode: 'replace' | 'append') => {
+   102→    if (mode === 'append' && loadingMoreRef.current) return
+   103→    if (mode === 'append') loadingMoreRef.current = true
+   104→    if (mode === 'replace') setRefreshing(true)
+   105→    else setLoadingMore(true)
+   106→    try {
+   107→      const res = await fetch(`/api/audit?limit=${PAGE_SIZE}&offset=${offset}`, { cache: 'no-store' })
+   108→      if (!res.ok) {
+   109→        setLiveStatus((s) => (s === 'connected' ? s : 'unavailable'))
+   110→        return
+   111→      }
+   112→      const json = await res.json()
+   113→      const rows: DbAuditEntry[] = Array.isArray(json?.data) ? json.data : []
+   114→      const pagination = json?.pagination as { total?: number; hasMore?: boolean } | undefined
+   115→      const mapped = rows.map(mapDbEntry)
+   116→      if (mode === 'replace') {
+   117→        setLiveEntries(mapped)
+   118→      } else {
+   119→        setLiveEntries((prev) => {
+   120→          const seen = new Set(prev.map((e) => e.id))
+   121→          return [...prev, ...mapped.filter((e) => !seen.has(e.id))]
+   122→        })
+   123→      }
+   124→      setLiveTotal(typeof pagination?.total === 'number' ? pagination.total : offset + mapped.length)
+   125→      setHasMore(pagination?.hasMore === true)
+   126→      setLiveStatus('connected')
+   127→      if (mode === 'replace') setLastRefreshedAt(new Date())
+   128→    } catch {
+   129→      setLiveStatus((s) => (s === 'connected' ? s : 'unavailable'))
+   130→    } finally {
+   131→      loadingMoreRef.current = false
+   132→      setLoadingMore(false)
+   133→      setRefreshing(false)
+   134→    }
+   135→  }, [])
+   136→
+   137→  // Hydrate live audit trail from the server (admin-only endpoint; fail soft)
+   138→  useEffect(() => {
+   139→    const t = setTimeout(() => void fetchPage(0, 'replace'), 0)
+   140→    return () => clearTimeout(t)
+   141→  }, [fetchPage])
+   142→
+   143→  // Live tail: poll for new entries every 20s and refresh when the tab regains focus
+   144→  useEffect(() => {
+   145→    if (liveStatus !== 'connected') return
+   146→    const interval = setInterval(() => void fetchPage(0, 'replace'), 20000)
+   147→    const onVisible = () => {
+   148→      if (document.visibilityState === 'visible') void fetchPage(0, 'replace')
+   149→    }
+   150→    document.addEventListener('visibilitychange', onVisible)
+   151→    return () => {
+   152→      clearInterval(interval)
+   153→      document.removeEventListener('visibilitychange', onVisible)
+   154→    }
+   155→  }, [liveStatus, fetchPage])
+   156→
+   157→  const allEntries = useMemo<MergedAuditEntry[]>(() => {
+   158→    // Live entries first — they carry real timestamps from today and dominate
+   159→    // recency sort anyway; simulated history follows.
+   160→    return [...liveEntries, ...auditEntries]
+   161→  }, [liveEntries])
+   162→
+   163→  const uniqueActions = useMemo(() => [...new Set(allEntries.map(e => e.action))], [allEntries])
+   164→  const uniqueEntityTypes = useMemo(() => [...new Set(allEntries.map(e => e.entityType))], [allEntries])
+   165→  const uniqueUsers = useMemo(() => [...new Set(allEntries.map(e => e.userName))], [allEntries])
+   166→
+   167→  const filteredEntries = useMemo(() => {
+   168→    let result = allEntries.filter((entry) => {
+   169→      if (actionFilter !== 'all' && entry.action !== actionFilter) return false
+   170→      if (entityTypeFilter !== 'all' && entry.entityType !== entityTypeFilter) return false
+   171→      if (userFilter !== 'all' && entry.userName !== userFilter) return false
+   172→      if (searchQuery) {
+   173→        const q = searchQuery.toLowerCase()
+   174→        return (
+   175→          entry.action.toLowerCase().includes(q) ||
+   176→          entry.details.toLowerCase().includes(q) ||
+   177→          entry.entityId.toLowerCase().includes(q) ||
+   178→          entry.userName.toLowerCase().includes(q)
+   179→        )
+   180→      }
+   181→      return true
+   182→    })
+   183→    result = [...result].sort((a, b) => {
+   184→      const diff = new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+   185→      return sortOrder === 'desc' ? -diff : diff
+   186→    })
+   187→    return result
+   188→  }, [allEntries, actionFilter, entityTypeFilter, userFilter, sortOrder, searchQuery])
+   189→
+   190→  const activeFilterCount = [actionFilter, entityTypeFilter, userFilter].filter(f => f !== 'all').length
+   191→
+   192→  // Date range of filtered entries
+   193→  const dateRange = useMemo(() => {
+   194→    if (filteredEntries.length === 0) return null
+   195→    const timestamps = filteredEntries.map(e => new Date(e.timestamp).getTime())
+   196→    const min = new Date(Math.min(...timestamps))
+   197→    const max = new Date(Math.max(...timestamps))
+   198→    return { from: min, to: max }
+   199→  }, [filteredEntries])
+   200→
+   201→  // CSV export
+   202→  const exportCSV = useCallback(() => {
+   203→    const headers = ['Timestamp', 'Action', 'Entity Type', 'Entity ID', 'User', 'Details']
+   204→    const rows = filteredEntries.map(e => [
+   205→      format(parseISO(e.timestamp), 'yyyy-MM-dd HH:mm:ss'),
+   206→      e.action,
+   207→      e.entityType,
+   208→      e.entityId,
+   209→      e.userName,
+   210→      `"${e.details.replace(/"/g, '""')}"`,
+   211→    ])
+   212→    const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n')
+   213→    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+   214→    const url = URL.createObjectURL(blob)
+   215→    const a = document.createElement('a')
+   216→    a.href = url
+   217→    a.download = `audit-logs-${format(new Date(), 'yyyy-MM-dd')}.csv`
+   218→    a.click()
+   219→    URL.revokeObjectURL(url)
+   220→  }, [filteredEntries])
+   221→
+   222→  const toggleRow = (id: string) => {
+   223→    setExpandedRow(prev => prev === id ? null : id)
+   224→  }
+   225→
+   226→  const rowVariants = {
+   227→    hidden: { opacity: 0, y: 8 },
+   228→    visible: (i: number) => ({
+   229→      opacity: 1,
+   230→      y: 0,
+   231→      transition: { delay: i * 0.03, duration: 0.25, ease: 'easeOut' },
+   232→    }),
+   233→    exit: { opacity: 0, y: -4, transition: { duration: 0.15 } },
+   234→  }
+   235→
+   236→  return (
+   237→    <div className="flex flex-col h-full min-h-0">
+   238→      {/* Header */}
+   239→      <div className="flex items-center justify-between px-4 sm:px-6 pt-4 sm:pt-6 pb-2">
+   240→        <div className="flex items-center gap-3">
+   241→          <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-muted shrink-0">
+   242→            <ScrollText className="w-5 h-5 text-muted-foreground" />
+   243→          </div>
+   244→          <div>
+   245→            <h1 className="text-lg sm:text-xl font-semibold text-foreground">Audit Logs</h1>
+   246→            <div className="flex items-center gap-2 mt-0.5">
+   247→              <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">
+   248→                {filteredEntries.length} of {allEntries.length} entries
+   249→              </Badge>
+   250→              {liveStatus === 'connected' && (
+   251→                <Badge
+   252→                  variant="outline"
+   253→                  className="text-[10px] px-1.5 py-0 h-4 gap-1 border-emerald-200 text-emerald-700 bg-emerald-50/70 dark:border-emerald-800/60 dark:text-emerald-400 dark:bg-emerald-950/30"
+   254→                  title="Server-recorded actions from custom plans, blocks and user management"
+   255→                >
+   256→                  <span className="relative flex h-1.5 w-1.5">
+   257→                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-500 opacity-60" />
+   258→                    <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
+   259→                  </span>
+   260→                  LIVE · {liveTotal} server
+   261→                </Badge>
+   262→              )}
+   263→              {dateRange && (
+   264→                <span className="text-[10px] text-muted-foreground flex items-center gap-1">
+   265→                  <CalendarRange className="w-3 h-3" />
+   266→                  {format(dateRange.from, 'dd MMM')} – {format(dateRange.to, 'dd MMM yyyy')}
+   267→                </span>
+   268→              )}
+   269→            </div>
+   270→          </div>
+   271→        </div>
+   272→        <div className="flex items-center gap-2">
+   273→          {liveStatus === 'connected' && (
+   274→            <Button
+   275→              variant="ghost"
+   276→              size="sm"
+   277→              className="h-8 text-xs gap-1.5 text-muted-foreground"
+   278→              onClick={() => void fetchPage(0, 'replace')}
+   279→              disabled={refreshing}
+   280→              title={lastRefreshedAt ? `Last refreshed ${format(lastRefreshedAt, 'HH:mm:ss')}` : 'Refresh from server'}
+   281→            >
+   282→              <RotateCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+   283→              <span className="hidden sm:inline">{refreshing ? 'Refreshing…' : 'Refresh'}</span>
+   284→            </Button>
+   285→          )}
+   286→          <Button
+   287→            variant="outline"
+   288→            size="sm"
+   289→            className="h-8 text-xs gap-1.5"
+   290→            onClick={exportCSV}
+   291→            disabled={filteredEntries.length === 0}
+   292→          >
+   293→            <Download className="w-3.5 h-3.5" />
+   294→            Export CSV
+   295→          </Button>
+   296→        </div>
+   297→      </div>
+   298→
+   299→      {/* Filters - stack vertically on mobile */}
+   300→      <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-2 px-4 sm:px-6 py-3 flex-wrap">
+   301→        <div className="flex items-center gap-1.5">
+   302→          <Filter className="w-3.5 h-3.5 text-muted-foreground/60" />
+   303→          {activeFilterCount > 0 && (
+   304→            <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4 rounded-full">
+   305→              {activeFilterCount}
+   306→            </Badge>
+   307→          )}
+   308→        </div>
+   309→
+   310→        <div className="flex flex-wrap items-center gap-2">
+   311→          <Select value={actionFilter} onValueChange={setActionFilter}>
+   312→            <SelectTrigger className="w-full sm:w-[160px] h-9 min-h-[44px] sm:h-7 text-xs">
+   313→              <SelectValue placeholder="Action" />
+   314→            </SelectTrigger>
+   315→            <SelectContent>
+   316→              <SelectItem value="all">All Actions</SelectItem>
+   317→              {uniqueActions.map(a => (
+   318→                <SelectItem key={a} value={a}>{a}</SelectItem>
+   319→              ))}
+   320→            </SelectContent>
+   321→          </Select>
+   322→
+   323→          <Select value={entityTypeFilter} onValueChange={setEntityTypeFilter}>
+   324→            <SelectTrigger className="w-full sm:w-[130px] h-9 min-h-[44px] sm:h-7 text-xs">
+   325→              <SelectValue placeholder="Entity" />
+   326→            </SelectTrigger>
+   327→            <SelectContent>
+   328→              <SelectItem value="all">All Entities</SelectItem>
+   329→              {uniqueEntityTypes.map(e => (
+   330→                <SelectItem key={e} value={e}>{e}</SelectItem>
+   331→              ))}
+   332→            </SelectContent>
+   333→          </Select>
+   334→
+   335→          <Select value={userFilter} onValueChange={setUserFilter}>
+   336→            <SelectTrigger className="w-full sm:w-[140px] h-9 min-h-[44px] sm:h-7 text-xs">
+   337→              <SelectValue placeholder="User" />
+   338→            </SelectTrigger>
+   339→            <SelectContent>
+   340→              <SelectItem value="all">All Users</SelectItem>
+   341→              {uniqueUsers.map(u => (
+   342→                <SelectItem key={u} value={u}>{u}</SelectItem>
+   343→              ))}
+   344→            </SelectContent>
+   345→          </Select>
+   346→        </div>
+   347→
+   348→        <div className="relative min-w-0 sm:min-w-[160px] sm:max-w-[220px] flex-1 sm:flex-initial">
+   349→          <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground/60" />
+   350→          <Input
+   351→            placeholder="Search logs..."
+   352→            className="h-9 sm:h-7 text-xs pl-7 w-full"
+   353→            value={searchQuery}
+   354→            onChange={(e) => setSearchQuery(e.target.value)}
+   355→            aria-label="Search audit logs"
+   356→          />
+   357→        </div>
+   358→
+   359→        <Button
+   360→          variant="ghost"
+   361→          size="sm"
+   362→          className="h-9 min-h-[44px] sm:h-7 text-xs gap-1"
+   363→          onClick={() => setSortOrder(prev => prev === 'desc' ? 'asc' : 'desc')}
+   364→        >
+   365→          <ArrowUpDown className="w-3 h-3" />
+   366→          {sortOrder === 'desc' ? 'Newest' : 'Oldest'}
+   367→        </Button>
+   368→
+   369→        {(activeFilterCount > 0 || searchQuery) && (
+   370→          <Button
+   371→            variant="ghost"
+   372→            size="sm"
+   373→            className="text-xs text-muted-foreground h-9 min-h-[44px] sm:h-7"
+   374→            onClick={() => {
+   375→              setActionFilter('all')
+   376→              setEntityTypeFilter('all')
+   377→              setUserFilter('all')
+   378→              setSearchQuery('')
+   379→            }}
+   380→          >
+   381→            Clear
+   382→          </Button>
+   383→        )}
+   384→      </div>
+   385→
+   386→      {/* Table - horizontally scrollable */}
+   387→      <div className="flex-1 min-h-0 px-4 sm:px-6 pb-4 sm:pb-6 overflow-auto">
+   388→        <div className="rounded-md border overflow-x-auto">
+   389→          <Table>
+   390→            <TableHeader>
+   391→              <TableRow className="bg-muted/40">
+   392→                <TableHead className="text-[11px] font-semibold h-8 w-[24px]" />
+   393→                <TableHead className="text-[11px] font-semibold h-8 w-[160px]">Timestamp</TableHead>
+   394→                <TableHead className="text-[11px] font-semibold h-8 w-[160px]">Action</TableHead>
+   395→                <TableHead className="text-[11px] font-semibold h-8 w-[90px]">Entity</TableHead>
+   396→                <TableHead className="text-[11px] font-semibold h-8 w-[100px]">Entity ID</TableHead>
+   397→                <TableHead className="text-[11px] font-semibold h-8 w-[120px]">User</TableHead>
+   398→                <TableHead className="text-[11px] font-semibold h-8">Details</TableHead>
+   399→              </TableRow>
+   400→            </TableHeader>
+   401→            <TableBody>
+   402→              <AnimatePresence mode="popLayout">
+   403→                {filteredEntries.map((entry, index) => {
+   404→                  const isExpanded = expandedRow === entry.id
+   405→                  return (
+   406→                    <motion.tr
+   407→                      key={entry.id}
+   408→                      custom={index}
+   409→                      variants={rowVariants}
+   410→                      initial="hidden"
+   411→                      animate="visible"
+   412→                      exit="exit"
+   413→                      className={`hover:bg-muted/30 cursor-pointer ${isExpanded ? 'bg-muted/20' : ''}`}
+   414→                      onClick={() => toggleRow(entry.id)}
+   415→                    >
+   416→                      <TableCell className="py-2 w-[24px]">
+   417→                        {isExpanded ? (
+   418→                          <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
+   419→                        ) : (
+   420→                          <ChevronRight className="w-3.5 h-3.5 text-muted-foreground/50" />
+   421→                        )}
+   422→                      </TableCell>
+   423→                      <TableCell className="text-xs font-mono tabular-nums py-2 text-muted-foreground">
+   424→                        <span className="flex items-center gap-1.5">
+   425→                          {entry.isLive && (
+   426→                            <span
+   427→                              className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0 shadow-[0_0_0_3px] shadow-emerald-500/15"
+   428→                              title="Recorded live on the server"
+   429→                            />
+   430→                          )}
+   431→                          {format(parseISO(entry.timestamp), 'dd MMM yyyy HH:mm')}
+   432→                        </span>
+   433→                      </TableCell>
+   434→                      <TableCell className="py-2">
+   435→                        <span className="flex items-center gap-1">
+   436→                          <Badge
+   437→                            variant="outline"
+   438→                            className={`text-[10px] px-1.5 py-0 h-4 font-mono ${ACTION_BADGE[entry.action] ?? 'bg-muted/50 text-muted-foreground border-border'}`}
+   439→                          >
+   440→                            {entry.action}
+   441→                          </Badge>
+   442→                          {entry.isLive && (
+   443→                            <Badge
+   444→                              variant="outline"
+   445→                              className="text-[8px] px-1 py-0 h-3 font-semibold tracking-wide border-emerald-300/70 text-emerald-600 bg-emerald-50/60 dark:border-emerald-700/60 dark:text-emerald-400 dark:bg-emerald-950/30"
+   446→                            >
+   447→                              LIVE
+   448→                            </Badge>
+   449→                          )}
+   450→                        </span>
+   451→                      </TableCell>
+   452→                      <TableCell className="text-xs py-2 capitalize">{entry.entityType}</TableCell>
+   453→                      <TableCell className="text-xs font-mono py-2 text-muted-foreground">{entry.entityId}</TableCell>
+   454→                      <TableCell className="text-xs py-2">{entry.userName}</TableCell>
+   455→                      <TableCell className="text-xs py-2 text-muted-foreground max-w-[200px] sm:max-w-[300px] truncate">
+   456→                        {entry.details}
+   457→                      </TableCell>
+   458→                    </motion.tr>
+   459→                  )
+   460→                })}
+   461→              </AnimatePresence>
+   462→            </TableBody>
+   463→          </Table>
+   464→
+   465→          {/* Expandable detail row */}
+   466→          <AnimatePresence>
+   467→            {expandedRow && (() => {
+   468→              const entry = filteredEntries.find(e => e.id === expandedRow)
+   469→              if (!entry) return null
+   470→              return (
+   471→                <motion.div
+   472→                  key={`detail-${entry.id}`}
+   473→                  initial={{ height: 0, opacity: 0 }}
+   474→                  animate={{ height: 'auto', opacity: 1 }}
+   475→                  exit={{ height: 0, opacity: 0 }}
+   476→                  transition={{ duration: 0.2, ease: 'easeOut' }}
+   477→                  className="overflow-hidden border-t border-border"
+   478→                >
+   479→                  <div className="px-6 py-4 bg-muted/10">
+   480→                    <div className="flex items-center justify-between gap-2 mb-2">
+   481→                      <h4 className="text-xs font-semibold text-foreground">Entry Details</h4>
+   482→                      {entry.isLive && (
+   483→                        <span className="flex items-center gap-1 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+   484→                          <Radio className="w-3 h-3" />
+   485→                          Recorded live on the server
+   486→                        </span>
+   487→                      )}
+   488→                    </div>
+   489→                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+   490→                      <div>
+   491→                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider">ID</p>
+   492→                        <p className="text-xs font-mono text-foreground mt-0.5">{entry.id}</p>
+   493→                      </div>
+   494→                      <div>
+   495→                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Timestamp</p>
+   496→                        <p className="text-xs font-mono text-foreground mt-0.5">{format(parseISO(entry.timestamp), 'yyyy-MM-dd HH:mm:ss')}</p>
+   497→                      </div>
+   498→                      <div>
+   499→                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Action</p>
+   500→                        <p className="text-xs font-mono text-foreground mt-0.5">{entry.action}</p>
+   501→                      </div>
+   502→                      <div>
+   503→                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Entity Type</p>
+   504→                        <p className="text-xs capitalize text-foreground mt-0.5">{entry.entityType}</p>
+   505→                      </div>
+   506→                      <div>
+   507→                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Entity ID</p>
+   508→                        <p className="text-xs font-mono text-foreground mt-0.5">{entry.entityId}</p>
+   509→                      </div>
+   510→                      <div>
+   511→                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider">User</p>
+   512→                        <p className="text-xs text-foreground mt-0.5">{entry.userName}</p>
+   513→                      </div>
+   514→                    </div>
+   515→                    <div className="mt-3">
+   516→                      <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Full Details</p>
+   517→                      <p className="text-xs text-foreground mt-0.5 leading-relaxed">{entry.details}</p>
+   518→                    </div>
+   519→                  </div>
+   520→                </motion.div>
+   521→              )
+   522→            })()}
+   523→          </AnimatePresence>
+   524→        </div>
+   525→
+   526→        {filteredEntries.length === 0 && (
+   527→          <EmptyState
+   528→            icon={ScrollText}
+   529→            title="No audit entries match your filters"
+   530→            description="Try adjusting your filter criteria or search terms."
+   531→            action={{
+   532→              label: 'Clear Filters',
+   533→              onClick: () => {
+   534→                setActionFilter('all')
+   535→                setEntityTypeFilter('all')
+   536→                setUserFilter('all')
+   537→                setSearchQuery('')
+   538→              },
+   539→            }}
+   540→          />
+   541→        )}
+   542→
+   543→        {/* Load more (server pagination) */}
+   544→        {hasMore && (
+   545→          <div className="flex justify-center py-3">
+   546→            <Button
+   547→              variant="outline"
+   548→              size="sm"
+   549→              className="h-9 text-xs gap-1.5 min-h-[44px] sm:min-h-0"
+   550→              onClick={() => void fetchPage(liveEntries.length, 'append')}
+   551→              disabled={loadingMore}
+   552→            >
+   553→              {loadingMore ? (
+   554→                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+   555→              ) : (
+   556→                <ChevronDown className="w-3.5 h-3.5" />
+   557→              )}
+   558→              {loadingMore ? 'Loading…' : `Load more (${liveTotal - liveEntries.length} older on server)`}
+   559→            </Button>
+   560→          </div>
+   561→        )}
+   562→        {liveStatus === 'connected' && !hasMore && liveEntries.length > 0 && (
+   563→          <p className="text-center text-[10px] text-muted-foreground py-2">
+   564→            Showing all {liveEntries.length} server-recorded entries · auto-refreshes every 20s
+   565→          </p>
+   566→        )}
+   567→      </div>
+   568→    </div>
+   569→  )
+   570→}
+   571→

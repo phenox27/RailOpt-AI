@@ -1,0 +1,222 @@
+     1→2276 /home/z/my-project/worklog.md
+     2→---
+     3→- Dark mode: maintenance table borders correct, sticky header, no clipped content
+     4→- Lint: 0 errors
+     5→
+     6→Stage Summary:
+     7→- Shipped: real cross-dataset command palette with deep links, batch-approval undo, full custom-plan↔planning integration with persistence, responsive/table/a11y polish, logo warning fix
+     8→- All buttons remain functional; team names untouched (Dhittika, Jeet, Diya, Debarshi, Rupam, Alivia only)
+     9→- Unresolved/risks: (1) dev server OOM under heavy parallel edit+compile+browser load — keep edits incremental; (2) manual blocks are per-browser localStorage (not DB) — same caveat as custom plans; (3) planning custom-plan selection resets when switching views (component state); (4) exports of custom plans include manual blocks but not their AI metadata (empty by design)
+    10→- Next round suggestions: (1) DB persistence via Prisma for custom plans + manual blocks + invited users; (2) per-role landing view after login (control office → timetable, engineering → maintenance); (3) drag-and-drop block rescheduling on the timeline; (4) printable corridor summary PDF per custom plan
+    11→
+    12→---
+    13→Task ID: cron-review-3
+    14→Agent: main (Z.ai Code, webDevReview cron)
+    15→Task: QA pass + DB persistence via Prisma for custom plans/manual blocks + per-role landing views + Plans styling polish
+    16→
+    17→Work Log:
+    18→- QA baseline: all views stable, zero console errors (fresh profile), server 200. Fresh browser profile had EMPTY localStorage — confirming last round's top risk (per-browser data loss) → chose DB persistence as this round's focus.
+    19→
+    20→- NEW FEATURE A — Durable server persistence (Prisma + SQLite):
+    21→  * Schema: added CustomPlan (name/type/startDate/endDate/status/version/createdBy/notes/blockIds-as-JSON-string) + ManualBlock (full block shape, planId link, maintenanceReqIds-as-JSON-string) — pushed via bun run db:push
+    22→  * API routes (all behind requireAuth + requireRole(['admin','planner'])):
+    23→    - GET/POST /api/custom-plans (POST validates name/dates, end>=start; accepts client id so frontend links stay consistent)
+    24→    - PATCH/DELETE /api/custom-plans/[id] (PATCH: addBlockId/removeBlockId/blockIds/name/notes/status/dates; DELETE: removes plan + unlinks its manual blocks via updateMany)
+    25→    - GET/POST /api/manual-blocks (POST also best-effort syncs the linked plan's blockIds server-side)
+    26→    - DELETE /api/manual-blocks/[id] (unlinks from plan)
+    27→  * src/lib/custom-plans.ts extended with fail-soft server helpers: fetchServer*/createServer*/deleteServer*/linkServer*, and id-diffed migrateLocal* (fetch first, POST only missing ids — fixed noisy duplicate POST 500s from earlier naive version)
+    28→  * Frontend write-through (both views): localStorage update stays instant+optimistic; API call fires non-blocking (void); DB is source of truth on next hydrate
+    29→  * plans-view hydration: migrateLocalCustomPlans + migrateLocalManualBlocks (server merge, localStorage = cache/fallback); same in planning-view
+    30→  * NEW sync indicator under Plans stats: 3 states — "Cloud-synced — saved to the server, available on any browser" (green DB icon) / "Saved on this device only" (amber) / "Checking server sync…" (spinner), aria-live=polite
+    31→
+    32→- NEW FEATURE B — Per-role landing view after login:
+    33→  * app-store: ROLE_HOME_VIEW map (admin→dashboard, planner→planning, control_office→timetable, engineering/snt/traction→maintenance)
+    34→  * setUserFromSession picks landing = last visited view (sessionStorage 'railopt-last-view') if still allowed for the role, else role home; setActiveView persists to sessionStorage; clearUser removes it
+    35→  * VERIFIED: Jeet signs in → lands on Planning; Debarshi → Maintenance Requests; role-restricted nav respected (Jeet has no Audit/Settings)
+    36→
+    37→- STYLING POLISH:
+    38→  * Plans stat cards: gradient top accent bars per metric (navy/violet→fuchsia/amber→orange/emerald→teal), hover lift + shadow + icon scale, group-hover brightening
+    39→  * Custom plan cards: saffron left border accent (border-l-4 #FF9933/70, dark variant) to distinguish from standard plans
+    40→  * Dark mode verified for all new elements (accent bars, indicator, saffron border — contrast good)
+    41→
+    42→Verification Results (agent-browser + direct DB):
+    43→- Created "DB Persistence Test" as Jeet → POST 201 → row in SQLite (createdBy "Jeet")
+    44→- **Acid test**: wiped localStorage+sessionStorage → reload → plan still listed (fetched from DB), stats updated
+    45→- Open in Planning → added manual block → manualBlock row + plan.blockIds updated SERVER-SIDE (PATCH verified)
+    46→- Deleted via UI "Delete Plan" → DELETE hit → DB empty (note: earlier "failed" delete was my test harness clicking wrong button text — app was fine)
+    47→- Migration: id-diffed, no more duplicate 500s; log shows clean GET/POST/PATCH/DELETE flows, 0 recent 500s
+    48→- Per-role landing: Jeet→Planning ✓, Debarshi→Maintenance ✓
+    49→- Lint: 0 errors; fresh console: 0 errors/warnings
+    50→- All 6 team demo accounts present on auth form with exact names (Dhittika/Jeet/Diya/Debarshi/Rupam/Alivia)
+    51→
+    52→Stage Summary:
+    53→- Custom plans + manual blocks are now durable and cross-browser/cross-user (DB-backed) with localStorage as instant cache + offline fallback + auto-migration; visible sync status indicator
+    54→- Role-aware landing makes the team demo feel purpose-built (each member lands where they work)
+    55→- Unresolved/risks: (1) OOM killed the dev server 3× this round (heavy Chrome+compile) — restart procedure works but keep sessions lean; (2) auth-guard requires login for these APIs — offline demo mode (isOffline flag) does not bypass, acceptable; (3) migration is id-diffed but does not reconcile field-level edits of the same plan id (last-write-wins localStorage vs DB) — acceptable for demo
+    56→- Next round suggestions: (1) invited-users persistence via Prisma User model (create endpoint + settings-view write-through); (2) audit-log entries for custom-plan create/delete (action=CUSTOM_PLAN_CREATED etc.) to enrich the Audit view; (3) drag-and-drop block rescheduling on the Planning timeline; (4) PDF export of a custom plan (server-side or print CSS already exists — add a dedicated print layout)
+    57→
+    58→---
+    59→Task ID: cron-review-4
+    60→Agent: main (Z.ai Code, webDevReview cron)
+    61→Task: QA pass + live audit trail (custom plans / manual blocks / user management) + invited-users DB persistence + styling polish
+    62→
+    63→Work Log:
+    64→- QA baseline: dev server healthy (200), fresh reload console clean, per-plan PDF endpoint verified working (/api/export/plan-pdf returns real PDF), leftover "DB Persistence Test" plan from last round deleted via UI
+    65→- BUG FIX: plans-view knownBlocks useMemo had wrong deps (anualBlocks] → [blocks, manualBlocks]) — simulated blocks changes wouldn't have recomputed the portfolio stats
+    66→- NEW FEATURE A — Live audit trail (closes cron-review-3 suggestion #2):
+    67→  * New src/lib/audit.ts: logAudit(session, {...}) — resolves a real Prisma User for demo session identities (email match → name match → admin fallback, since demo session ids like 'user-admin' are not DB ids); fail-soft, never breaks the main flow
+    68→  * FK safety learned the hard way: AuditLog.planId/blockId/requestId have FK constraints to the standard Plan/Block/MaintenanceRequest tables — CustomPlan/ManualBlock ids live in separate tables and VIOLATE the FK. logAudit now verifies each optional link (findUnique) before writing and drops dangling refs; API calls use entityId + human-readable details instead
+    69→  * Wired into: custom-plans POST (CUSTOM_PLAN_CREATED), PATCH (BLOCK_ADDED_TO_PLAN / BLOCK_REMOVED_FROM_PLAN / CUSTOM_PLAN_UPDATED), DELETE (CUSTOM_PLAN_DELETED), manual-blocks POST/DELETE (MANUAL_BLOCK_CREATED/DELETED), users POST/PATCH/DELETE (USER_INVITED / USER_UPDATED / USER_REMOVED)
+    70→  * audit-view: fetches GET /api/audit?limit=50 (admin-only, fail-soft), merges live + simulated entries, per-row emerald dot + LIVE chip, header "LIVE · N server" badge with ping animation, detail panel "Recorded live on the server" indicator, 10 new action badge colors (saffron=create, red=delete, amber=update, emerald=block-add, violet=user), CSV export includes live entries automatically
+    71→- NEW FEATURE B — Invited-users durable persistence (closes cron-review-3 suggestion #1):
+    72→  * New PROTECTED_USER_EMAILS set in auth-guard (6 demo team + 8 seeded staff emails) — team accounts can never be modified/removed via API
+    73→  * GET /api/users (admin) returns invited users only (notIn protected); POST validates name/email/role, 409 on duplicate, creates Prisma User + USER_INVITED audit; PATCH [id] (role/isActive/name/department, audited); DELETE [id] (invited only, audited)
+    74→  * settings-view users tab: hydrate from DB on mount (localStorage = instant cache/offline fallback, DB = source of truth), optimistic invite flow replaces local id with server record on 201, 409 reconciles by removing the optimistic row, role/status toggles PATCH through for invited users, NEW "Remove user" dropdown action (local + server DELETE + override cleanup)
+    75→  * Acid test PASSED: wiped localStorage+sessionStorage → reload → "Test Invite" still listed (DB hydration)
+    76→- STYLING POLISH:
+    77→  * Audit live badge (emerald, animate-ping dot, respects prefers-reduced-motion kill-switch already in globals.css)
+    78→  * Cloud-synced (green Database icon) / Device-only (amber HardDrive icon) chips in Settings users header + dynamic footer status text
+    79→  * Invite flow loading states: Send Invite button shows spinner + "Saving…", disabled during submit; Cancel disabled too
+    80→  * Remove user menu item with red focus styling + Trash2 icon
+    81→  * Dark mode verified: all new badges/chips have explicit dark variants, contrast good (screenshot-verified light + dark)
+    82→
+    83→Verification Results (agent-browser + direct DB):
+    84→- Create plan as Dhittika → CUSTOM_PLAN_CREATED in DB (userName "Dhittika") → Audit view shows "LIVE · 10 server", entry with LIVE chip, expandable details correct
+    85→- Delete plan → CUSTOM_PLAN_DELETED recorded (after FK fix; the first create attempt exposed the FK violation, fixed in logAudit)
+    86→- Invite "Test Invite" (test-invite@railopt.ai) → User row in DB + USER_INVITED audit + toast "saved to the server" + Cloud-synced chip
+    87→- Change role engineering→planner → DB role updated + USER_UPDATED audit "fields: role"
+    88→- Remove user → DB count 0 + USER_REMOVED audit "(was planner)" + table clean
+    89→- Per-role landing still works (Jeet → Planning); sign-out → landing page → sign-in flows all functional
+    90→- Console: 0 errors/warnings (fresh reload, light + dark); lint: 0 errors; DB left clean (0 custom plans, 0 invited users, audit history preserved as demo data)
+    91→
+    92→Stage Summary:
+    93→- Shipped: full live audit trail for all planner/admin mutations (plans, blocks, users) with FK-safe attribution, durable invited-user management with optimistic UI + server reconciliation, styling polish with dark-mode variants
+    94→- All buttons functional; team demo names untouched (Dhittika, Jeet, Diya, Debarshi, Rupam, Alivia)
+    95→- Unresolved/risks: (1) /api/users is admin-only — non-admin Settings access doesn't exist in nav so no exposure, but if settings is ever opened for planners the tab will show "Device-only" fallback (graceful); (2) audit view merge shows seeded DB entries with LIVE chip too (semantically correct — they are server records; slight visual duplication with simulated entries of same actions); (3) same OOM caveat as before — keep edit+test cycles lean; (4) user status overrides for TEAM accounts remain localStorage-only by design
+    96→- Next round suggestions: (1) drag-and-drop block rescheduling on the Planning timeline (long-standing suggestion, biggest UX win left); (2) audit view pagination/load-more for the live feed + auto-refresh (e.g. refetch on view focus); (3) per-custom-plan print layout ("Corridor Summary" A4 sheet) complementing the existing JSON/CSV/PDF exports; (4) USER_INVITED entries could carry the invited user's id in entityId (currently the acting admin's DB user is attributed via userName only)
+    97→
+    98→---
+    99→Task ID: cron-review-5
+   100→Agent: main (Z.ai Code, webDevReview cron)
+   101→Task: QA pass + drag-and-drop block rescheduling (top suggestion from cron-review-4) + audit live-feed pagination/auto-refresh + per-plan Corridor Summary A4 print sheet + styling polish
+   102→
+   103→Work Log:
+   104→- QA baseline: server healthy, all views render, 0 console errors on fresh session; team demo accounts intact on the auth form (Dhittika/Jeet/Diya/Debarshi/Rupam/Alivia with exact roles)
+   105→- OOM incident: next-server killed twice (RSS ~1.8–1.9GB) while Chrome + dev + lint ran together. Learned fixes: (a) close the agent-browser Chrome before linting/restarts, (b) after an OOM restart a STALE turbopack persistent cache served an outdated globals.css chunk under the same URL — `rm -rf .next/dev/cache` + restart was required to un-stick it (plain touch/reload did NOT). Recommend this as the standard recovery when served CSS does not match the file on disk.
+   106→
+   107→- NEW FEATURE A — Drag-and-drop block rescheduling on the Planning timeline (long-standing #1 suggestion):
+   108→  * block-timeline.tsx: pointer-based horizontal drag for manual/custom blocks only (gated by isManual flag or custom- id prefix — standard blk-* blocks stay locked, verified). 4px press threshold so click-to-select still works; suppressClickRef prevents the post-drag synthetic click from toggling selection
+   109→  * 15-minute snap grid (0.25h) with clamp to [0, 24h − duration]; live saffron snap guides + floating time chip ("HH:MM → HH:MM") + dashed ghost outline at the original slot + dimmed/desaturated siblings while dragging; dragged block gets saffron ring + scale + shadow
+   110→  * Keyboard a11y: Shift+←/→ nudges a focused movable block by 15 min; aria-labels mention draggability; hover card shows "Drag to reschedule · Shift + ←/→ nudges 15 min" hint; legend gained "Drag custom blocks" entry; persistent grip handle on movable blocks (content padded pl-4)
+   111→  * BUG FIXED during E2E: "Cannot update a component (PlanningView) while rendering (BlockTimeline)" — endDrag called onMoveBlock inside the setDrag updater. Fixed with dragValueRef mirror so commit-time side effects run outside updaters. Verified: repeated drags on clean sessions produce ZERO console errors (the warning had also been haunting stale HMR tabs; fresh loads are clean)
+   112→  * planning-view.tsx handleMoveBlock: updates state + localStorage + server; toast "Block rescheduled — HH:MM → HH:MM (saved to server)"
+   113→  * API: PATCH /api/manual-blocks/[id] (auth admin/planner) updates startTime/endTime/duration and writes a BLOCK_RESCHEDULED audit entry with old → new window; lib gained updateServerManualBlock + updateLocalManualBlock
+   114→  * E2E VERIFIED (agent-browser pointer-event dispatch): 02:00→06:00 (+4h) with PATCH 200, localStorage updated, timeline repositioned; keyboard nudge 06:00→06:15 verified; standard blk-001 unmoved; audit trail shows "Rescheduled "Manual Block — NDLS-GZB Engineering" on NDLS-GZB: 02:00–05:00 → 06:00–09:00 (180 min)"
+   115→  * A demo manual block ("Manual Block — NDLS-GZB Engineering", custom-1789143571280, now 17:15–20:15 on 2025-01-27) was left in the DB intentionally so the feature is demoable on first open
+   116→
+   117→- NEW FEATURE B — Audit live feed: auto-refresh + load-more (closes cron-review-4 suggestion #2):
+   118→  * fetchPage(offset, mode) refactor: 'replace' refreshes newest page (manual Refresh button with spinning RotateCw + last-refreshed tooltip, 20s polling interval, visibilitychange refetch), 'append' id-dedupes older pages for the Load more button ("Load more (N older on server)"); LIVE badge now shows server total (pagination.total); footer note "Showing all N server-recorded entries · auto-refreshes every 20s"; BLOCK_RESCHEDULED badge (amber) added
+   119→  * Verified: LIVE · 24 server, Refresh click OK, footer note present; load-more correctly hidden while hasMore=false (24 < 50 page size)
+   120→
+   121→- NEW FEATURE C — Per-plan "Corridor Summary" A4 print sheet (closes cron-review-4 suggestion #3):
+   122→  * New corridor-summary-print.tsx: official Government-of-India letterhead (bilingual), plan identification table (name/type/period/version-status/prepared-by/sections/notes), 5 stat boxes, Section A block schedule (sorted, ◆ AI markers, full dept names), Section B linked maintenance requests (Score + S&T labels), Section C three-column sign-off (Jeet / Diya / Debarshi with role titles + signature lines), confidential footer
+   123→  * Trigger: printer icon button on EVERY plan card (standard + custom). Component mounts → body.printing-single-plan → auto window.print() → afterprint clears state
+   124→  * Print CSS (globals.css): .corridor-summary-print hidden on screen; body.printing-single-plan hides plans-regular-content, PrintHeader, government header/footer (new government-print-header/footer hook classes), TopBar ([role="banner"]) and the prototype banner (new .prototype-banner class) — print output is ONLY the A4 sheet; @page margins 8mm/10mm
+   125→  * VERIFIED via CDP print-to-PDF: single clean page, all app chrome hidden, letterhead → tables → sign-off all fit one page. Artifact saved: download/corridor-summary-final.pdf
+   126→
+   127→- STYLING POLISH (mandatory): drag focus effect (siblings dim to opacity-50 saturate-50), persistent 35%-opacity grip on movable blocks, saffron snap grid + time chip + ghost, "Drag custom blocks" legend entry, audit Refresh spinner + Load-more loading state, dark-mode verified for all new elements (screenshots light + dark)
+   128→
+   129→Verification Results (agent-browser + DB + CDP PDF):
+   130→- Drag E2E ×5 across sessions: consistent, zero console errors after the setState fix
+   131→- Keyboard nudge ✓, standard-block lock ✓, PATCH 200 + BLOCK_RESCHEDULED audit ✓
+   132→- Audit refresh/pagination UI ✓; per-plan print PDF clean single page ✓
+   133→- bun run lint: 0 errors; dev.log clean 200s; team names untouched everywhere
+   134→
+   135→Stage Summary:
+   136→- Shipped the three top suggestions from cron-review-4: drag-and-drop rescheduling (pointer + keyboard, persisted client+server+audit), audit live-feed auto-refresh/load-more, per-plan Corridor Summary A4 print sheet — plus a real React bug fix (setState-in-render) and the turbopack stale-cache recovery recipe
+   137→- All buttons functional; demo data includes one manual block to showcase dragging
+   138→- Unresolved/risks: (1) OOM remains the main hazard — Chrome + dev + lint in parallel WILL eventually kill next-server at 4GB; close the browser for heavy ops and use the .next/dev/cache reset if CSS goes stale; (2) manual blocks with planId pointing at STANDARD plans are allowed by design (block created while a standard plan is active) — audit attribution uses entityId so no FK issues; (3) drag is horizontal-only (no lane changes) by design; (4) print sheet uses inline styles (not Tailwind) deliberately — print output ignores theme
+   139→- Next round suggestions: (1) conflict feedback during drag (live overlap detection vs other blocks/trains with a warning chip in the time tooltip); (2) drag handle on Gantt view rows for the same reschedule affordance there; (3) undo for drag commits (toast Undo restoring previous window, like approvals batch undo); (4) audit view: server-side action filter pushdown (currently fetches pages then filters client-side)
+   140→
+   141→---
+   142→Task ID: cron-review-6
+   143→Agent: main (Z.ai Code, webDevReview cron)
+   144→Task: QA pass + drag UX completion round: live conflict feedback during reschedule + Undo for drag commits + Gantt-view drag support (closes cron-review-5 suggestions #1, #2, #3)
+   145→
+   146→Work Log:
+   147→- QA baseline: all admin views swept via agent-browser — 0 console errors; team accounts intact; demo manual block persisted through sign-out/sign-in (DB hydration working as designed)
+   148→
+   149→- NEW FEATURE A — Live conflict feedback during drag (closes suggestion #1):
+   150→  * computeOverlaps() helper (exported, shared with Gantt): names of same-day blocks whose window overlaps the proposed slot
+   151→  * While dragging: time chip turns RED, pulsing, and reads "⚠ Overlaps Block A1…, Block A2… +1" (max 2 names + count); ghost outline turns red; overlapping blocks get a red ring + glow and stay fully saturated while everything else dims; snap guides turn from saffron to red
+   152→  * On commit with conflicts: toast.warning "Block moved — overlaps detected" listing the overlaps; commit still proceeds (planner's decision), never blocks
+   153→  * VERIFIED: dragged demo block into the 01:00–06:00 cluster → chip "⚠ Overlaps Block A1 — NDLS-GZB Engineering, Block A2 — NDLS-GZB Combined +1", 3 red rings visible (screenshot), warning toast correct
+   154→
+   155→- NEW FEATURE B — Undo for drag commits (closes suggestion #3):
+   156→  * handleMoveBlock now captures the previous window and shows sonner toast with Undo action (8s success / 9s warning); Undo restores state + localStorage + server PATCH (and is itself audited as a reschedule by the API)
+   157→  * applyTimes writes localStorage from a FRESH loadManualBlocks() read (not a stale closure) so undo can never clobber concurrent changes
+   158→  * Keyboard nudges (Shift+←/→) are silent on success (no toast spam) but still warn on conflicts; keyboard path now also computes overlaps
+   159→  * VERIFIED: undo click restores exact previous startTime/endTime, "Reschedule reverted" toast shows, PATCH fired; success path toast "Block rescheduled — 00:00 → 17:00 (saved to server) [Undo]"
+   160→
+   161→- NEW FEATURE C — Gantt view drag-to-reschedule (closes suggestion #2):
+   162→  * Same pointer-drag mechanics ported to GanttView bars: onMoveBlock prop (planning-view passes the same handleMoveBlock), 15-min snap, clamp 0–24h, delta conversion uses the group chart-area width × hoursVisible (zoom-aware)
+   163→  * Drag visuals: saffron ring + brightness/saturation on the dragged bar, siblings dim, overlapped bars red-ring, persistent grip handle on movable bars, HoverCard suppressed mid-drag, click-after-drag suppressed; legend entry "Drag custom blocks"
+   164→  * Fixed my own re-introduction of the setState-in-render antipattern in the first draft (side effect inside setGanttDrag updater) — same dragValueRef mirror pattern as the timeline; also fixed a TDZ declaration-order bug (hoursVisible used before declaration) and removed a ref-during-render write after the new react-hooks/refs rule flagged it (endGanttDrag now takes filteredBlocks via deps)
+   165→  * VERIFIED: Gantt drag +3h → 17:00 → 20:00 committed, toast + Undo shown, PATCH 200, bar re-rendered at new slot; standard bars unmoved
+   166→
+   167→- STYLING POLISH (mandatory): red conflict theme across the whole drag surface (chip/ghost/guides/rings), persistent grip handles, drag legends in both views, Gantt toolbar untouched, dark-mode-safe (all new classes are color utilities with good contrast on both themes)
+   168→
+   169→Verification Results (agent-browser):
+   170→- Timeline: conflict drag ✓ (chip/rings/toast), undo round-trip ✓ (00:00 restored), success drag ✓, keyboard-nudge silence ✓
+   171→- Gantt: +3h drag commit ✓, visuals ✓
+   172→- Fresh-session E2E: sign-in → Planning → drag 20:00 → 17:00 → success toast with Undo, console 0 errors/warnings
+   173→- bun run lint: 0 errors (after fixing refs/immutability/declaration-order issues)
+   174→- OOM hit once mid-round (lint + Chrome together) — standard recovery used; lint now always run with the browser closed
+   175→
+   176→Stage Summary:
+   177→- Shipped: conflict-aware drag rescheduling (timeline + Gantt) with live visual feedback, undoable commits, and keyboard-supporting pipeline; drag now consistent across both schedule views
+   178→- All buttons functional; team names untouched; demo manual block left at 17:00–20:00 Mon Jan 27 2025 for demoing
+   179→- Unresolved/risks: (1) OOM discipline required (browser closed for lint); (2) overlap detection is same-day-blocks-only — train timetable conflicts are NOT recomputed live (the pre-existing conflicts data still drives the ⚠ badges); (3) Gantt drag at zoom>1 can move a bar out of the visible window (commit still correct; bar re-appears after release); (4) undo does not remove the extra BLOCK_RESCHEDULED audit entry created by the revert (by design — audit trail is append-only)
+   180→- Next round suggestions: (1) audit view server-side action filter pushdown (fetch with ?action= instead of client-side filtering; needs merge strategy with simulated entries); (2) drag conflict detection vs train timetable events ( enrich chip with train numbers from conflicts data); (3) corridor utilization mini-chart on the Planning right rail that live-updates during drag (shows the freed/reused window); (4) print: per-plan PDF endpoint could accept ?summary=1 to reuse the Corridor Summary layout server-side for a download (current print is client-side only)
+   181→
+   182→---
+   183→Task ID: cron-review-7
+   184→Agent: main (Z.ai Code, webDevReview cron)
+   185→Task: QA pass + corridor utilization live mini-chart + train-timetable conflict detection during drag (closes cron-review-6 suggestions #2, #3)
+   186→
+   187→Work Log:
+   188→- QA baseline: swept all 8 admin views via agent-browser — 0 console errors/warnings; team accounts intact (Dhittika/Jeet/Diya/Debarshi/Rupam/Alivia on Quick Demo Access); demo manual block persisted through restart. Investigated a suspected "Settings nav doesn't navigate" bug → turned out to be stale agent-browser snapshot refs, NOT an app bug (JS click navigates fine, view survives focus/visibility session refetches — store's setUserFromSession reset is benign because LAST_VIEW_KEY always matches current view)
+   189→- OOM hit twice this round (Chrome + turbopack recompile at 4GB). Discovery: `nohup bun run dev &` alone is NOT enough — the process group dies when the tool shell exits. RELIABLE recipe: `(setsid bun run dev > /dev/null 2>&1 &)`, close Chrome during heavy ops. Restarted + re-verified server this way
+   190→
+   191→- NEW FEATURE A — Corridor Utilization panel (new corridor-utilization.tsx, closes suggestion #3):
+   192→  * 24-hour utilization chart (1h buckets) on the Planning right rail: bar height = summed block-minutes per hour, color scale emerald ≤40% → amber ≤70% → orange high → red "competing" (>60 min booked + dot marker + count in legend "Nh competing")
+   193→  * LIVE drag preview: BlockTimeline/GanttView stream onDragPreview({blockId, startH, durationH, conflictCount, trainNumbers}) on every snapped pointer move (deduped by the existing dragValueRef change-guards, fired OUTSIDE setState updaters); panel removes the dragged block's original slot and overlays the proposed one — freed/reused capacity visible in real time; saffron/red bracket overlay, pulsing "Previewing HH:MM–HH:MM" badge (time integrated in badge after first screenshot showed the old floating chip colliding with the panel title)
+   194→  * Live advisory banner while previewing with conflicts (red for block overlaps, amber for train-only)
+   195→  * Train-path strip under the chart: all 7 corridor trains as spans (indigo), turning RED where the preview crosses them; per-span title tooltip "number · dep → arr (+1d) · name"
+   196→  * Footer stats: Peak load % (color-coded), Block hours, longest Free window (HH:MM–HH:MM); now-marker line; hover tooltips per bar ("HH:00 · Xm · competing")
+   197→  * Train cross-check for the SELECTED block (green "Clear of train paths" / amber "N trains cross this block: 12302 Rajdhani · …") — hidden while dragging
+   198→  * Placement: top of the right rail in ALL three states (block selected / empty state / mobile Sheet above detail content)
+   199→
+   200→- NEW FEATURE B — Train-timetable conflict detection (new lib/train-conflicts.ts, closes suggestion #2):
+   201→  * TRAIN_WINDOWS precomputed from simulated data with overnight wrap (arr ≤ dep → +24h); computeTrainOverlaps(startH, durationH) matches both same-day and previous-day-shifted windows (Duronto 20:40→06:15 correctly hits a 01:00–05:00 block)
+   202→  * Timeline drag chip is now two-tier: main chip red+pulse on block overlap (unchanged), NEW second amber row "🚆 Train 12302, 12002 +1 in path" when the proposed slot crosses trains; train-only overlap (no block conflict) shows an amber chip + amber ghost; on commit: red toast for block overlaps (now with train suffix), NEW amber "Block moved — train path crossing" toast for train-only, success toast otherwise — all with Undo
+   203→  * Keyboard nudges (Shift+←/→) compute trains too; Gantt drag commits pass trainNumbers as well
+   204→  * E2E verified: drag to 01:00 zone → chip "⚠ Overlaps Block A1… + Train 12302, 12002 +1 in path"; toast "...crosses train 12302, 12002 +2"; Gantt drag 17:15→13:00 → "crosses train 12002, 22436" (both arrive ~14:00–14:15 ✓); block A1 selection → "5 trains cross this block" (incl. 2 overnight) ✓; 17:00–20:00 selection → "Clear of train paths" ✓
+   205→
+   206→- BUG FIX — HoverCard controlled/uncontrolled React warnings (pre-existing, surfaced during drags): timeline `open={isDragging ? false : isHovered ? undefined : false}` and Gantt `open={isDragBar ? false : undefined}` switched modes mid-interaction; now fully controlled (`open={isDragging ? false : isHovered}` / `open={isDragBar ? false : isHovered}`). Verified: drag + hover cycle produces ZERO console warnings
+   207→
+   208→- STYLING POLISH (mandatory): the utilization panel itself (heat-scale bars, train strips, stats grid, legends, advisories, now-marker, hover tooltips); Previewing badge with integrated mono time; train-span tooltips; dark-mode verified (mid-drag-dark.png) with strong contrast; mobile sheet layout verified (mobile-sheet-utilization.png)
+   209→
+   210→Verification Results (agent-browser + DB):
+   211→- Timeline drag E2E: live Previewing badge + bracket + two-tier chip mid-drag ✓; commit toasts (red/amber/success) ✓; Undo round-trips ✓; PATCH /api/manual-blocks 200 ×14 ✓; BLOCK_RESCHEDULED audit entries with old → new windows for every drag+undo ✓
+   212→- Gantt drag preview parity ✓ (badge + advisory live mid-drag)
+   213→- Block A1 cross-check = 5 trains ✓; 17:00 block = clear ✓
+   214→- All 8 views swept clean (0 errors, 0 warnings); bun run lint: 0 errors
+   215→- Demo manual block left at 17:00–20:00 Mon Jan 27 2025 (clean round slot, clear of trains)
+   216→- Artifacts: download/mid-drag-live-preview.png, download/mid-drag-dark.png, download/utilization-full.png, download/mobile-sheet-utilization.png
+   217→
+   218→Stage Summary:
+   219→- Shipped the two top suggestions from cron-review-6: live corridor utilization mini-chart (drag-aware) + train-timetable conflict detection end-to-end (chip → toast → panel advisory → cross-check); fixed the last console warnings (HoverCard); documented the reliable setsid dev-server restart recipe
+   220→- All buttons functional; team names untouched; no new dependencies
+   221→- Unresolved/risks: (1) OOM discipline — setsid + Chrome closed for lint/recompile; (2) train-section mapping is corridor-wide by design (all 7 trains treated as corridor traffic — fine for the demo, would need per-section timetables in production); (3) utilization buckets count minutes summed across overlapping blocks (peak can exceed 100% — labeled "competing", intended); (4) dragPreview state resets on view switch (by design); (5) overnight train prev-day logic assumes blocks never wrap past 24h (guaranteed by clamp)
+   222→- Next round suggestions: (1) audit view server-side action filter pushdown (?action= param, carried over from cron-review-6); (2) utilization panel click-to-jump: click an hour bucket to jump timeline selection to that hour's first block; (3) "next departures" ticker (trainsDepartingWithin helper already in lib, unused); (4) optimization results could write AI-recommended block slots back through the same reschedule pipeline for audit parity; (5) per-section utilization selector (panel currently aggregates all plan blocks on the day)

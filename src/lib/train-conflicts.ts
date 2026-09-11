@@ -83,11 +83,15 @@ export function hasTrainOverlap(startH: number, durationH: number): boolean {
   })
 }
 
-/** Trains departing within the next `hours` from `fromH` (for status strips). */
+/**
+ * Trains departing within the next `hours` from `fromH` (for status strips).
+ * A train whose departure has already passed today recurs at startH + 24
+ * (tomorrow), so windows that cross midnight still catch early-morning runs.
+ */
 export function trainsDepartingWithin(fromH: number, hours: number): TrainWindow[] {
   const toH = fromH + hours
   return TRAIN_WINDOWS.filter((w) => {
-    const s = w.startH < fromH && w.overnight ? w.startH + 24 : w.startH
+    const s = w.startH >= fromH ? w.startH : w.startH + 24 // next occurrence: today or tomorrow
     return s >= fromH && s <= toH
   })
 }

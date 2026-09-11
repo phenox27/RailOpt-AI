@@ -21,6 +21,7 @@ import { GanttView } from './gantt-view'
 import { CrewSchedulingPanel } from './crew-scheduling-panel'
 import { BlockDurationOptimizer } from './block-duration-optimizer'
 import { CorridorUtilization, type DragPreviewInfo } from './corridor-utilization'
+import { NextDepartures } from './next-departures'
 import {
   Sparkles,
   Plus,
@@ -379,6 +380,31 @@ export function PlanningView() {
   const utilDayBlocks = useMemo(() => (
     planBlocks.filter((b) => new Date(b.startTime).toISOString().split('T')[0] === selectedDate)
   ), [planBlocks, selectedDate])
+
+  // Click an hour bucket in the Corridor Utilization panel → select that hour's first block
+  const handleHourJump = useCallback((hour: number) => {
+    const startOf = (b: SimBlock) => {
+      const d = new Date(b.startTime)
+      return d.getHours() + d.getMinutes() / 60
+    }
+    const starting = utilDayBlocks
+      .filter((b) => startOf(b) >= hour && startOf(b) < hour + 1)
+      .sort((a, b) => startOf(a) - startOf(b))
+    const covering = utilDayBlocks
+      .filter((b) => startOf(b) <= hour && startOf(b) + b.duration / 60 > hour)
+      .sort((a, b) => startOf(a) - startOf(b))
+    const target = starting[0] ?? covering[0]
+    if (target) {
+      handleSelectBlock(target.id)
+      const dep = new Date(target.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      toast.success(`Inspecting ${target.name}`, { description: `Starts at ${dep}` })
+    } else {
+      toast.info(`${hour.toString().padStart(2, '0')}:00–${(hour + 1).toString().padStart(2, '0')}:00 is free`, {
+        description: 'No blocks in this hour — a good candidate slot for new maintenance work',
+      })
+    }
+  }, [utilDayBlocks, isMobile])
+
   const totalBlocks = planBlocks.length
   const aiRecommended = planBlocks.filter((b) => b.isAiRecommended).length
   const planConflicts = conflicts.filter((c) => !c.resolved)
@@ -812,24 +838,27 @@ export function PlanningView() {
               <SheetHeader>
                 <SheetTitle className="text-sm">Block Details</SheetTitle>
               </SheetHeader>
-              <CorridorUtilization dayBlocks={utilDayBlocks} preview={dragPreview} selectedBlock={selectedBlock} />
+              <CorridorUtilization dayBlocks={utilDayBlocks} preview={dragPreview} selectedBlock={selectedBlock} onHourClick={handleHourJump} dayLabel={format(currentDate, 'EEE d MMM')} selectedHour={selectedBlock ? new Date(selectedBlock.startTime).getHours() : null} />
+              <NextDepartures className="mx-4 mt-3" />
               {detailContent}
             </SheetContent>
           </Sheet>
         ) : (
           selectedBlock ? (
             <div className="w-full lg:w-[340px] xl:w-[380px] border-l border-border overflow-y-auto bg-background">
-              <CorridorUtilization dayBlocks={utilDayBlocks} preview={dragPreview} selectedBlock={selectedBlock} />
+              <CorridorUtilization dayBlocks={utilDayBlocks} preview={dragPreview} selectedBlock={selectedBlock} onHourClick={handleHourJump} dayLabel={format(currentDate, 'EEE d MMM')} selectedHour={selectedBlock ? new Date(selectedBlock.startTime).getHours() : null} />
+              <NextDepartures className="mx-4 mt-3" />
               {detailContent}
             </div>
           ) : (
             <div className="hidden lg:flex w-[340px] xl:w-[380px] border-l border-border flex-col overflow-y-auto bg-muted/10">
-              <CorridorUtilization dayBlocks={utilDayBlocks} preview={dragPreview} className="bg-background" />
+              <CorridorUtilization dayBlocks={utilDayBlocks} preview={dragPreview} className="bg-background" onHourClick={handleHourJump} dayLabel={format(currentDate, 'EEE d MMM')} selectedHour={selectedBlock ? new Date(selectedBlock.startTime).getHours() : null} />
+              <NextDepartures className="mx-4 mt-3" />
               <div className="flex-1 flex items-center justify-center py-10">
                 <div className="text-center text-muted-foreground px-4">
                   <Info className="h-8 w-8 mx-auto mb-2 opacity-30" />
                   <p className="text-xs font-medium">Select a block to view details</p>
-                  <p className="text-[10px] mt-1">Click on any block in the timeline</p>
+                  <p className="text-[10px] mt-1">Click a block in the timeline — or an hour in the utilization chart</p>
                 </div>
               </div>
             </div>
