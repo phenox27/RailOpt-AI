@@ -1982,3 +1982,40 @@ Stage Summary:
 - App state: all 8 views render and work; auth (credentials demo accounts + optional Google) works; RBAC nav restrictions verified
 - Known risks: 4GB RAM OOM during cold turbopack builds (mitigate: warm cache, single instance); Google OAuth buttons show helpful error toast when GOOGLE_CLIENT_ID/SECRET unset (by design)
 - Suggested next: per-role landing after login, real DB-backed plans/blocks sync, PWA offline support polish
+
+---
+Task ID: cron-review-1
+Agent: main (Z.ai Code, webDevReview cron)
+Task: QA assessment + new features (Plan Creation wizard, User Management) + styling polish + bug fix (Settings tab strip)
+
+Work Log:
+- QA assessment: dev server healthy (single instance, warm cache), landing + login + dashboard verified clean, zero console errors
+- Created 15-min webDevReview cron (previous round), reviewed worklog before starting
+- BUG FOUND & FIXED (major): Settings tab strip collapses to height 0 and becomes invisible/unclickable whenever the active panel is tall (e.g. Notifications tab = 951px). Root cause: the `overflow-x-auto` tab-strip wrapper is a flex child of the column-flex Tabs root with h-full; scroll containers get automatic min-size 0, so flex-shrink squeezes it to 0. Clicks were being hit-tested to the parent (elementFromPoint returned the root div). Verified via keyboard nav (worked — focus doesn't need visibility) vs mouse click (failed) + getBoundingClientRect (wrapper h=0). FIX: added `shrink-0` to the wrapper (`<div className="overflow-x-auto shrink-0 -mx-4 px-4 ...">` in settings-view.tsx). Post-fix: listH=36, hitWorks=true, all tabs clickable. NOTE: same latent pattern may exist in other views' flex layouts — watch for "element covered by parent" symptoms.
+
+- NEW FEATURE A — Plan Creation wizard (plans-view.tsx):
+  * "+ New Plan" now opens a real dialog: name (pre-filled with next Monday's week), type (weekly/monthly), start/end date pickers, optional notes, read-only "Created By" = current user (team names only)
+  * Validation: required name/dates, end >= start, inline error toasts
+  * Created plans get orange "Custom" badge + Draft status, appear first in list, auto-expand details, health score baseline (25 empty → +10/block capped 90)
+  * PERSISTENCE: custom plans saved to localStorage 'railopt-custom-plans'; verified survive full page reload
+  * Delete: trash icon per custom plan → AlertDialog confirmation → removed + persisted
+  * Stats strip added to Plans view (new): 4 KPI cards — Plans count, Blocks Planned, Engineer Hours, AI Recommended % — updates live as plans are created/deleted
+  * Export dropdown now exports ALL plans incl. custom ones (exportAllPlansAsJSON/CSV take plan list param)
+
+- NEW FEATURE B — User Management (settings-view.tsx, admin):
+  * Users tab upgraded: search by name/email, role filter dropdown, per-row Actions dropdown (⋯)
+  * Change Role submenu (all 6 roles; current role disabled) — verified: Jeet Planner → Control Office → back, toast feedback, badge updates instantly
+  * Activate/Deactivate toggle — verified on Rupam (inactive badge + warning toast, then reactivated)
+  * "Invite User" dialog: name, official email (validated, duplicate check), role, department → adds row with orange "NEW" badge, persisted to localStorage 'railopt-invited-users'; verified: invited aarav.das@railway.gov.in, count 8→9
+  * Role/status overrides persisted to 'railopt-user-overrides'; footer shows "Showing X of Y users · changes persist on this device"
+  * Uses team names only (Jeet, Debarshi, Rupam, Alivia, Diya, Dhittika + sample staff)
+  * New icons imported: UserPlus, MoreHorizontal, UserCheck, UserX, ShieldCheck, Search, Users; DropdownMenuSub for role submenu
+
+- LINT: fixed react-hooks/set-state-in-effect errors from localStorage hydration — async hydration pattern (setTimeout 0 + cleanup) for both plans-view and settings-view effects; final lint: 0 errors
+- Browser verification: Plan wizard create→persist→delete ✓; stats strip live update ✓; role change ✓; deactivate/activate ✓; invite ✓; search ✓; tab strip visible & clickable after fix ✓; zero console errors; dev.log clean 200s
+
+Stage Summary:
+- App now has full Plans CRUD (create/delete custom plans with persistence) and admin user management (roles, status, invites) — both demo-persisted via localStorage
+- Fixed a subtle pre-existing flex layout bug that made Settings tabs unusable on tall panels
+- Unresolved/risks: custom plans don't yet appear in Planning view timeline (base plans only) — acceptable for demo; localStorage data is per-browser; settings-view still has one legacy "handleSave" toast pattern for tabs without persistence beyond what's implemented
+- Next round suggestions: (1) custom plan block assignment flow (pick blocks in Planning for a custom plan), (2) invite-user → DB persistence via Prisma User model, (3) polish Approvals batch actions UX, (4) consider extracting "flex-strip shrink-0" lesson: audit other overflow-x-auto wrappers inside h-full flex columns (top-bar, audit-view)

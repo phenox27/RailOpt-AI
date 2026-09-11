@@ -25,6 +25,8 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Separator } from '@/components/ui/separator'
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent, DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { useAppStore, type Role } from '@/store/app-store'
 import { useTheme } from 'next-themes'
 import { departmentSummary, maintenanceRequests } from '@/data/simulated-data'
@@ -60,8 +62,15 @@ import {
   LayoutGrid,
   List,
   Pencil,
+  UserPlus,
+  MoreHorizontal,
+  UserCheck,
+  UserX,
+  ShieldCheck,
   MapPin,
   LogOut,
+  Search,
+  Users,
 } from 'lucide-react'
 
 const USERS = [
@@ -87,6 +96,41 @@ const ROLE_BADGE_COLORS: Record<string, string> = {
   engineering: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-400 dark:border-emerald-800/50',
   snt: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/30 dark:text-amber-400 dark:border-amber-800/50',
   traction: 'bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-950/30 dark:text-violet-400 dark:border-violet-800/50',
+}
+
+// ─── User management (admin) — persisted to localStorage ───
+interface ManagedUser {
+  id: string
+  name: string
+  role: string
+  department: string
+  status: string
+  email: string
+  invited?: boolean
+}
+
+const USER_OVERRIDES_KEY = 'railopt-user-overrides'
+const INVITED_USERS_KEY = 'railopt-invited-users'
+
+type UserOverride = { role?: string; status?: string }
+
+function loadUserOverrides(): Record<string, UserOverride> {
+  try {
+    const raw = localStorage.getItem(USER_OVERRIDES_KEY)
+    return raw ? (JSON.parse(raw) as Record<string, UserOverride>) : {}
+  } catch {
+    return {}
+  }
+}
+
+function loadInvitedUsers(): ManagedUser[] {
+  try {
+    const raw = localStorage.getItem(INVITED_USERS_KEY)
+    const parsed = raw ? (JSON.parse(raw) as ManagedUser[]) : []
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
 }
 
 const ACCENT_COLORS = [
@@ -138,6 +182,108 @@ export function SettingsView() {
   const [animationEnabled, setAnimationEnabled] = useState(true)
   const [defaultView, setDefaultView] = useState('dashboard')
   const [itemsPerPage, setItemsPerPage] = useState('25')
+
+  // ─── User management state ───
+  const [userOverrides, setUserOverrides] = useState<Record<string, UserOverride>>({})
+  const [invitedUsers, setInvitedUsers] = useState<ManagedUser[]>([])
+  const [inviteOpen, setInviteOpen] = useState(false)
+  const [inviteName, setInviteName] = useState('')
+  const [inviteEmail, setInviteEmail] = useState('')
+  const [inviteRole, setInviteRole] = useState('engineering')
+  const [inviteDept, setInviteDept] = useState('Engineering')
+  const [userSearch, setUserSearch] = useState('')
+  const [userRoleFilter, setUserRoleFilter] = useState('all')
+
+  // Load persisted user management data on mount (async hydration to avoid render cascade)
+  useEffect(() => {
+    const t = setTimeout(() => {
+      try {
+        const overrides = loadUserOverrides()
+        if (Object.keys(overrides).length > 0) {
+          setUserOverrides(overrides)
+        }
+        const invited = loadInvitedUsers()
+        if (invited.length > 0) {
+          setInvitedUsers(invited)
+        }
+      } catch {
+        // ignore malformed persisted data
+      }
+    }, 0)
+    return () => clearTimeout(t)
+  }, [])
+
+  // Merge base users + invited users, then apply overrides
+  const managedUsers: ManagedUser[] = [...USERS, ...invitedUsers].map((u) => {
+    const o = userOverrides[u.id]
+    return o ? { ...u, role: o.role ?? u.role, status: o.status ?? u.status } : u
+  })
+
+  const visibleUsers = managedUsers.filter((u) => {
+    if (userRoleFilter !== 'all' && u.role !== userRoleFilter) return false
+    if (userSearch.trim()) {
+      const q = userSearch.toLowerCase()
+      return u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q)
+    }
+    return true
+  })
+
+  const persistOverrides = (next: Record<string, UserOverride>) => {
+    setUserOverrides(next)
+    try { localStorage.setItem(USER_OVERRIDES_KEY, JSON.stringify(next)) } catch { /* noop */ }
+  }
+
+  const handleRoleChange = (userId: string, userName: string, role: string) => {
+    persistOverrides({ ...userOverrides, [userId]: { ...userOverrides[userId], role } })
+    toast.success(`${userName} is now ${ROLE_LABELS[role] ?? role}`, {
+      description: 'Role change takes effect on their next sign-in.',
+    })
+  }
+
+  const handleToggleStatus = (userId: string, userName: string, current: string) => {
+    const next = current === 'active' ? 'inactive' : 'active'
+    persistOverrides({ ...userOverrides, [userId]: { ...userOverrides[userId], status: next } })
+    if (next === 'inactive') {
+      toast.warning(`${userName} deactivated`, { description: 'Their access will be suspended on next sign-in.' })
+    } else {
+      toast.success(`${userName} reactivated`, { description: 'Access restored.' })
+    }
+  }
+
+  const handleInviteUser = () => {
+    const name = inviteName.trim()
+    const email = inviteEmail.trim().toLowerCase()
+    if (!name || !email) {
+      toast.error('Name and email are required')
+      return
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      toast.error('Enter a valid email address')
+      return
+    }
+    if (managedUsers.some((u) => u.email.toLowerCase() === email)) {
+      toast.error('A user with this email already exists')
+      return
+    }
+    const user: ManagedUser = {
+      id: `invited-${Date.now()}`,
+      name,
+      email,
+      role: inviteRole,
+      department: inviteDept,
+      status: 'active',
+      invited: true,
+    }
+    const next = [user, ...invitedUsers]
+    setInvitedUsers(next)
+    try { localStorage.setItem(INVITED_USERS_KEY, JSON.stringify(next)) } catch { /* noop */ }
+    setInviteOpen(false)
+    setInviteName('')
+    setInviteEmail('')
+    toast.success(`Invitation sent to ${name}`, {
+      description: `${email} · ${ROLE_LABELS[inviteRole] ?? inviteRole} · on first sign-in they set a password.`,
+    })
+  }
 
   const deptRequestCounts = departmentSummary.map(d => ({
     ...d,
@@ -210,8 +356,8 @@ export function SettingsView() {
 
       <div className="flex-1 min-h-0 px-4 sm:px-6 pb-4 sm:pb-6 overflow-auto">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
-          {/* Scrollable tabs on mobile */}
-          <div className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0 mb-4">
+          {/* Scrollable tabs on mobile — shrink-0 prevents flex from collapsing the strip when panel content is tall */}
+          <div className="overflow-x-auto shrink-0 -mx-4 px-4 sm:mx-0 sm:px-0 mb-4">
             <TabsList className="h-9">
               <TabsTrigger value="profile" className="text-xs whitespace-nowrap gap-1"><User className="h-3 w-3 hidden sm:inline" />Profile</TabsTrigger>
               <TabsTrigger value="general" className="text-xs whitespace-nowrap">General</TabsTrigger>
@@ -648,9 +794,41 @@ export function SettingsView() {
               <motion.div key="users" variants={tabContentVariants} initial="hidden" animate="visible" exit="exit">
                 <TabsContent value="users" className="mt-0">
                   <Card>
-                    <CardHeader>
-                      <CardTitle className="text-sm">User Management</CardTitle>
-                      <CardDescription className="text-xs">{USERS.length} users registered</CardDescription>
+                    <CardHeader className="pb-3">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div>
+                          <CardTitle className="text-sm">User Management</CardTitle>
+                          <CardDescription className="text-xs">{managedUsers.length} users · manage roles and access</CardDescription>
+                        </div>
+                        <Button size="sm" className="h-8 text-xs gap-1.5 shrink-0" onClick={() => setInviteOpen(true)}>
+                          <UserPlus className="w-3.5 h-3.5" />
+                          Invite User
+                        </Button>
+                      </div>
+                      {/* Search + role filter */}
+                      <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                        <div className="relative flex-1">
+                          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                          <Input
+                            value={userSearch}
+                            onChange={(e) => setUserSearch(e.target.value)}
+                            placeholder="Search by name or email…"
+                            className="h-9 pl-8 text-xs"
+                            aria-label="Search users"
+                          />
+                        </div>
+                        <Select value={userRoleFilter} onValueChange={setUserRoleFilter}>
+                          <SelectTrigger className="w-full sm:w-[160px] h-9 text-xs">
+                            <SelectValue placeholder="All roles" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All Roles</SelectItem>
+                            {Object.entries(ROLE_LABELS).map(([value, label]) => (
+                              <SelectItem key={value} value={value}>{label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
                     </CardHeader>
                     <CardContent>
                       <div className="rounded-md border overflow-x-auto">
@@ -662,10 +840,18 @@ export function SettingsView() {
                               <TableHead className="text-[11px] font-semibold h-8 hidden sm:table-cell">Department</TableHead>
                               <TableHead className="text-[11px] font-semibold h-8 hidden md:table-cell">Email</TableHead>
                               <TableHead className="text-[11px] font-semibold h-8">Status</TableHead>
+                              <TableHead className="text-[11px] font-semibold h-8 text-right">Actions</TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
-                            {USERS.map((user) => (
+                            {visibleUsers.length === 0 && (
+                              <TableRow>
+                                <TableCell colSpan={6} className="text-center text-xs text-muted-foreground py-6">
+                                  No users match your search.
+                                </TableCell>
+                              </TableRow>
+                            )}
+                            {visibleUsers.map((user) => (
                               <TableRow key={user.id} className="hover:bg-muted/30">
                                 <TableCell className="text-xs font-medium py-2">
                                   <div className="flex items-center gap-2">
@@ -673,7 +859,12 @@ export function SettingsView() {
                                       {user.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
                                     </div>
                                     <div className="min-w-0">
-                                      <span className="truncate block">{user.name}</span>
+                                      <span className="truncate block flex items-center gap-1">
+                                        {user.name}
+                                        {user.invited && (
+                                          <Badge variant="outline" className="text-[8px] px-1 py-0 h-3 border-[#fdba74] text-[#c2570b] bg-[#fff7ed] dark:bg-orange-950/30 dark:text-orange-400 dark:border-orange-800 shrink-0">NEW</Badge>
+                                        )}
+                                      </span>
                                       <span className="text-muted-foreground block sm:hidden text-[10px]">{user.department}</span>
                                     </div>
                                   </div>
@@ -688,11 +879,63 @@ export function SettingsView() {
                                 <TableCell className="py-2">
                                   <Badge variant="outline" className={`text-[10px] px-1.5 py-0 h-4 ${
                                     user.status === 'active'
-                                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-400 dark:border-emerald-800/50'
                                       : 'bg-muted/50 text-muted-foreground border-border'
                                   }`}>
                                     {user.status}
                                   </Badge>
+                                </TableCell>
+                                <TableCell className="py-2 text-right">
+                                  <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-7 w-7"
+                                        aria-label={`Manage ${user.name}`}
+                                      >
+                                        <MoreHorizontal className="h-4 w-4" />
+                                      </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end" className="w-44">
+                                      <DropdownMenuSub>
+                                        <DropdownMenuSubTrigger className="text-xs gap-2">
+                                          <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground" />
+                                          Change Role
+                                        </DropdownMenuSubTrigger>
+                                        <DropdownMenuSubContent className="w-44">
+                                          {Object.entries(ROLE_LABELS).map(([value, label]) => (
+                                            <DropdownMenuItem
+                                              key={value}
+                                              className="text-xs gap-2"
+                                              disabled={user.role === value}
+                                              onClick={() => handleRoleChange(user.id, user.name, value)}
+                                            >
+                                              {user.role === value && <Check className="h-3 w-3 text-primary" />}
+                                              {label}
+                                            </DropdownMenuItem>
+                                          ))}
+                                        </DropdownMenuSubContent>
+                                      </DropdownMenuSub>
+                                      <DropdownMenuSeparator />
+                                      <DropdownMenuItem
+                                        className="text-xs gap-2"
+                                        onClick={() => handleToggleStatus(user.id, user.name, user.status)}
+                                      >
+                                        {user.status === 'active' ? (
+                                          <>
+                                            <UserX className="h-3.5 w-3.5 text-red-500" />
+                                            <span className="text-red-600 dark:text-red-400">Deactivate</span>
+                                          </>
+                                        ) : (
+                                          <>
+                                            <UserCheck className="h-3.5 w-3.5 text-emerald-500" />
+                                            <span className="text-emerald-600 dark:text-emerald-400">Activate</span>
+                                          </>
+                                        )}
+                                      </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                  </DropdownMenu>
                                 </TableCell>
                               </TableRow>
                             ))}
@@ -700,7 +943,10 @@ export function SettingsView() {
                         </Table>
                       </div>
                     </CardContent>
-                    <CardFooter className="pt-2">
+                    <CardFooter className="pt-2 justify-between">
+                      <span className="text-[10px] text-muted-foreground">
+                        Showing {visibleUsers.length} of {managedUsers.length} users · changes persist on this device
+                      </span>
                       <Button size="sm" className="h-8 text-xs gap-1.5" onClick={() => handleSave('User')}>
                         <Save className="w-3.5 h-3.5" />
                         Save Changes
@@ -1079,6 +1325,78 @@ export function SettingsView() {
           </AnimatePresence>
         </Tabs>
       </div>
+
+      {/* Invite User Dialog */}
+      <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <Users className="h-4 w-4 text-primary" />
+              Invite User
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Send an access invitation. They will set a password on first sign-in and appear in the directory below.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3.5 py-1">
+            <div className="space-y-1.5">
+              <Label htmlFor="invite-name" className="text-xs font-medium">Full Name <span className="text-red-500">*</span></Label>
+              <Input
+                id="invite-name"
+                value={inviteName}
+                onChange={(e) => setInviteName(e.target.value)}
+                placeholder="e.g. Aarav Das"
+                className="text-sm h-9"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="invite-email" className="text-xs font-medium">Official Email <span className="text-red-500">*</span></Label>
+              <Input
+                id="invite-email"
+                type="email"
+                value={inviteEmail}
+                onChange={(e) => setInviteEmail(e.target.value)}
+                placeholder="name@railway.gov.in"
+                className="text-sm h-9"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium">Role</Label>
+                <Select value={inviteRole} onValueChange={setInviteRole}>
+                  <SelectTrigger className="text-xs h-9"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(ROLE_LABELS).map(([value, label]) => (
+                      <SelectItem key={value} value={value}>{label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium">Department</Label>
+                <Select value={inviteDept} onValueChange={setInviteDept}>
+                  <SelectTrigger className="text-xs h-9"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Planning">Planning</SelectItem>
+                    <SelectItem value="Engineering">Engineering</SelectItem>
+                    <SelectItem value="Signal & Telecom">Signal & Telecom</SelectItem>
+                    <SelectItem value="Traction Distribution">Traction Distribution</SelectItem>
+                    <SelectItem value="Control Office">Control Office</SelectItem>
+                    <SelectItem value="Administration">Administration</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" size="sm" onClick={() => setInviteOpen(false)}>Cancel</Button>
+            <Button size="sm" onClick={handleInviteUser} className="gap-1.5">
+              <UserPlus className="h-3.5 w-3.5" />
+              Send Invite
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

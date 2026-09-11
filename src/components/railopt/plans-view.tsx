@@ -1,20 +1,60 @@
 'use client'
 
-import { useState } from 'react'
-import { plans, blocks, maintenanceRequests, conflicts } from '@/data/simulated-data'
+import { useState, useEffect, useMemo } from 'react'
+import { plans, blocks, maintenanceRequests, conflicts, type SimPlan } from '@/data/simulated-data'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { useAppStore } from '@/store/app-store'
-import { FileText, Calendar, GitBranch, Clock, CheckCircle2, AlertCircle, ChevronRight, Download, Share2, Printer, FileDown, GitCompare, Trophy, Sparkles, ShieldAlert } from 'lucide-react'
+import { FileText, Calendar, GitBranch, Clock, CheckCircle2, AlertCircle, ChevronRight, Download, Share2, Printer, FileDown, GitCompare, Trophy, Sparkles, ShieldAlert, Plus, Trash2, CalendarPlus, Boxes, Gauge, Bot } from 'lucide-react'
 import { PrintHeader } from './print-header'
 import { EmptyState } from './empty-state'
 import { toast } from 'sonner'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useIsMobile } from '@/hooks/use-mobile'
+
+// Custom plans created by the user (persisted to localStorage)
+interface CustomPlan extends SimPlan {
+  isCustom: boolean
+}
+
+const CUSTOM_PLANS_KEY = 'railopt-custom-plans'
+
+function loadCustomPlans(): CustomPlan[] {
+  try {
+    const raw = localStorage.getItem(CUSTOM_PLANS_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as CustomPlan[]
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+function persistCustomPlans(list: CustomPlan[]) {
+  try {
+    localStorage.setItem(CUSTOM_PLANS_KEY, JSON.stringify(list))
+  } catch {
+    // storage unavailable — plans stay in memory for this session
+  }
+}
 
 const statusColors: Record<string, string> = {
   draft: 'bg-muted text-muted-foreground',
@@ -130,9 +170,9 @@ async function sharePlan(plan: typeof plans[0], planBlocks: typeof blocks) {
   }
 }
 
-function exportAllPlansAsJSON() {
+function exportAllPlansAsJSON(planList: (typeof plans[0])[]) {
   const exportData = {
-    plans: plans.map((plan) => {
+    plans: planList.map((plan) => {
       const planBlocks = blocks.filter((b) => plan.blockIds.includes(b.id))
       const planRequests = maintenanceRequests.filter((mr) => planBlocks.some((b) => b.maintenanceReqIds.includes(mr.id)))
       return {
@@ -150,13 +190,13 @@ function exportAllPlansAsJSON() {
   a.download = `railopt-all-plans-${new Date().toISOString().split('T')[0]}.json`
   a.click()
   URL.revokeObjectURL(url)
-  toast.success('All plans exported', { description: `${plans.length} plans downloaded as JSON` })
+  toast.success('All plans exported', { description: `${planList.length} plans downloaded as JSON` })
 }
 
-function exportAllPlansAsCSV() {
+function exportAllPlansAsCSV(planList: (typeof plans[0])[]) {
   const headers = ['Plan', 'Block ID', 'Name', 'Section', 'From', 'To', 'Start', 'End', 'Duration (min)', 'Department', 'Line', 'AI Recommended']
   const rows: string[] = []
-  for (const plan of plans) {
+  for (const plan of planList) {
     const planBlocks = blocks.filter((b) => plan.blockIds.includes(b.id))
     for (const b of planBlocks) {
       rows.push([plan.name, b.id, b.name, b.section, b.stationFrom, b.stationTo, b.startTime, b.endTime, String(b.duration), b.department, b.line, b.isAiRecommended ? 'Yes' : 'No'].join(','))
@@ -170,7 +210,7 @@ function exportAllPlansAsCSV() {
   a.download = `railopt-all-plans-${new Date().toISOString().split('T')[0]}.csv`
   a.click()
   URL.revokeObjectURL(url)
-  toast.success('All plans exported', { description: `${plans.length} plans downloaded as CSV` })
+  toast.success('All plans exported', { description: `${planList.length} plans downloaded as CSV` })
 }
 
 // Comparison table component
@@ -315,10 +355,121 @@ function PlanComparisonTable() {
 }
 
 export function PlansView() {
-  const { setActiveView } = useAppStore()
+  const { setActiveView, currentUserName } = useAppStore()
   const isMobile = useIsMobile()
   const [compareMode, setCompareMode] = useState(false)
   const [expandedPlanId, setExpandedPlanId] = useState<string | null>(null)
+  // Custom plan wizard
+  const [customPlans, setCustomPlans] = useState<CustomPlan[]>([])
+  const [createOpen, setCreateOpen] = useState(false)
+  const [newPlanName, setNewPlanName] = useState('')
+  const [newPlanType, setNewPlanType] = useState<'weekly' | 'monthly'>('weekly')
+  const [newPlanStart, setNewPlanStart] = useState('')
+  const [newPlanEnd, setNewPlanEnd] = useState('')
+  const [newPlanNotes, setNewPlanNotes] = useState('')
+  const [deletePlanId, setDeletePlanId] = useState<string | null>(null)
+
+  // Load persisted custom plans on mount (async hydration to avoid render cascade)
+  useEffect(() => {
+    const t = setTimeout(() => {
+      try {
+        const raw = localStorage.getItem(CUSTOM_PLANS_KEY)
+        if (!raw) return
+        const parsed = JSON.parse(raw) as CustomPlan[]
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setCustomPlans(parsed)
+        }
+      } catch {
+        // ignore malformed persisted data
+      }
+    }, 0)
+    return () => clearTimeout(t)
+  }, [])
+
+  // Base plans first, then user-created plans
+  const allPlans = useMemo(() => [...customPlans, ...plans], [customPlans])
+
+  // Portfolio stats strip
+  const stats = useMemo(() => {
+    const allBlockIds = new Set(allPlans.flatMap((p) => p.blockIds))
+    const allBlocks = blocks.filter((b) => allBlockIds.has(b.id))
+    const totalMinutes = allBlocks.reduce((s, b) => s + b.duration, 0)
+    const aiCount = allBlocks.filter((b) => b.isAiRecommended).length
+    return {
+      plans: allPlans.length,
+      blocks: allBlocks.length,
+      hours: Math.round(totalMinutes / 60),
+      aiPct: allBlocks.length > 0 ? Math.round((aiCount / allBlocks.length) * 100) : 0,
+    }
+  }, [allPlans])
+
+  const handleCreatePlan = () => {
+    const name = newPlanName.trim()
+    if (!name) {
+      toast.error('Plan name is required')
+      return
+    }
+    if (!newPlanStart || !newPlanEnd) {
+      toast.error('Start and end dates are required')
+      return
+    }
+    if (newPlanEnd < newPlanStart) {
+      toast.error('End date must be on or after the start date')
+      return
+    }
+    const plan: CustomPlan = {
+      id: `custom-plan-${Date.now()}`,
+      name,
+      type: newPlanType,
+      startDate: newPlanStart,
+      endDate: newPlanEnd,
+      status: 'draft',
+      version: 1,
+      createdBy: currentUserName || 'You',
+      blockIds: [],
+      isCustom: true,
+    }
+    const next = [plan, ...customPlans]
+    setCustomPlans(next)
+    persistCustomPlans(next)
+    setCreateOpen(false)
+    setNewPlanName('')
+    setNewPlanStart('')
+    setNewPlanEnd('')
+    setNewPlanNotes('')
+    setExpandedPlanId(plan.id)
+    toast.success(`Plan "${name}" created`, {
+      description: `${newPlanType === 'weekly' ? 'Weekly' : 'Monthly'} · ${newPlanStart} → ${newPlanEnd}. Add blocks from Planning, then run AI optimization.`,
+    })
+  }
+
+  const handleDeletePlan = () => {
+    if (!deletePlanId) return
+    const target = customPlans.find((p) => p.id === deletePlanId)
+    const next = customPlans.filter((p) => p.id !== deletePlanId)
+    setCustomPlans(next)
+    persistCustomPlans(next)
+    if (expandedPlanId === deletePlanId) setExpandedPlanId(null)
+    setDeletePlanId(null)
+    if (target) {
+      toast.success('Plan deleted', { description: `"${target.name}" was removed.` })
+    }
+  }
+
+  const openCreateDialog = () => {
+    // Suggest a sensible default window starting next Monday
+    const today = new Date()
+    const nextMonday = new Date(today)
+    nextMonday.setDate(today.getDate() + ((8 - today.getDay()) % 7 || 7))
+    const sunday = new Date(nextMonday)
+    sunday.setDate(nextMonday.getDate() + 6)
+    const iso = (d: Date) => d.toISOString().split('T')[0]
+    setNewPlanName(`Block Plan — ${iso(nextMonday)} week`)
+    setNewPlanType('weekly')
+    setNewPlanStart(iso(nextMonday))
+    setNewPlanEnd(iso(sunday))
+    setCreateOpen(true)
+  }
 
   const handlePrint = () => {
     window.print()
@@ -362,7 +513,10 @@ export function PlansView() {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          <Button size="sm" className="h-9 min-h-[44px] sm:h-auto" onClick={() => { toast.info('Create blocks in Planning — the AI optimizer assembles them into plans'); setActiveView('planning') }}>+ New Plan</Button>
+          <Button size="sm" className="h-9 min-h-[44px] sm:h-auto gap-1" onClick={openCreateDialog}>
+            <Plus className="h-3.5 w-3.5" />
+            New Plan
+          </Button>
           {/* Print button */}
           <Button variant="outline" size="sm" className="h-9 min-h-[44px] sm:h-auto gap-1" onClick={handlePrint}>
             <Printer className="h-3.5 w-3.5" />
@@ -370,6 +524,31 @@ export function PlansView() {
             <span className="sm:hidden">Print</span>
           </Button>
         </div>
+      </motion.div>
+
+      {/* Portfolio stats strip */}
+      <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.25, delay: 0.05 }}
+        className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3"
+      >
+        {([
+          { icon: FileText, label: 'Plans', value: String(stats.plans), tint: 'text-[#0d47a1] dark:text-[#9fa8da]', ring: 'border-[#9fa8da]/40' },
+          { icon: Boxes, label: 'Blocks Planned', value: String(stats.blocks), tint: 'text-violet-600 dark:text-violet-400', ring: 'border-violet-300/40' },
+          { icon: Clock, label: 'Engineer Hours', value: `${stats.hours}h`, tint: 'text-amber-600 dark:text-amber-400', ring: 'border-amber-300/40' },
+          { icon: Bot, label: 'AI Recommended', value: `${stats.aiPct}%`, tint: 'text-emerald-600 dark:text-emerald-400', ring: 'border-emerald-300/40' },
+        ] as const).map((s) => (
+          <div key={s.label} className={`flex items-center gap-2.5 rounded-xl border ${s.ring} bg-card/60 px-3 py-2.5 shadow-sm`}>
+            <div className={`flex items-center justify-center w-8 h-8 rounded-lg bg-muted/60 shrink-0`}>
+              <s.icon className={`h-4 w-4 ${s.tint}`} />
+            </div>
+            <div className="min-w-0">
+              <p className="text-lg font-bold leading-none text-foreground tabular-nums">{s.value}</p>
+              <p className="text-[10px] text-muted-foreground mt-1 truncate">{s.label}</p>
+            </div>
+          </div>
+        ))}
       </motion.div>
 
       {/* Comparison Table (shown when compare mode is on) */}
@@ -389,19 +568,20 @@ export function PlansView() {
 
       {/* Plans List */}
       <div className="space-y-4">
-        {plans.length === 0 ? (
+        {allPlans.length === 0 ? (
           <EmptyState
             icon={FileText}
             title="No plans created yet"
             description="Create your first block plan to start optimizing maintenance schedules."
           />
         ) : null}
-        {plans.map((plan, planIdx) => {
+        {allPlans.map((plan, planIdx) => {
+          const isCustomPlan = (plan as CustomPlan).isCustom === true
           const planBlocks = blocks.filter((b) => plan.blockIds.includes(b.id))
           const planRequests = maintenanceRequests.filter((mr) => planBlocks.some((b) => b.maintenanceReqIds.includes(mr.id)))
           const stepIndex = getStepIndex(plan.status)
           const totalDuration = planBlocks.reduce((sum, b) => sum + b.duration, 0)
-          const healthScore = planHealthScores[plan.id] ?? 0
+          const healthScore = planHealthScores[plan.id] ?? (planBlocks.length > 0 ? Math.min(90, 40 + planBlocks.length * 10) : 25)
           const optimizedAt = lastOptimized[plan.id]
 
           return (
@@ -424,8 +604,25 @@ export function PlansView() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
+                    {isCustomPlan && (
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-5 bg-[#fff7ed] text-[#c2570b] border-[#fdba74] dark:bg-orange-950/30 dark:text-orange-400 dark:border-orange-800">
+                        <CalendarPlus className="h-2.5 w-2.5 mr-0.5" />
+                        Custom
+                      </Badge>
+                    )}
                     <Badge variant="outline" className={statusColors[plan.status]}>{statusLabels[plan.status]}</Badge>
                     <Badge variant="outline" className="text-xs">{plan.type === 'weekly' ? 'Weekly' : 'Monthly'}</Badge>
+                    {isCustomPlan && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-muted-foreground hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
+                        aria-label={`Delete plan ${plan.name}`}
+                        onClick={() => setDeletePlanId(plan.id)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
                   </div>
                 </div>
               </CardHeader>
@@ -624,15 +821,107 @@ export function PlansView() {
       <Card className="print-keep print-card" data-card>
         <CardContent className="p-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-sm">
-            <span className="text-muted-foreground">{plans.length} plan{plans.length !== 1 ? 's' : ''} total</span>
+            <span className="text-muted-foreground">{allPlans.length} plan{allPlans.length !== 1 ? 's' : ''} total{customPlans.length > 0 ? ` · ${customPlans.length} custom` : ''}</span>
             <div className="flex items-center gap-4 flex-wrap">
-              <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-success" />{plans.filter((p) => p.status === 'approved').length} approved</span>
-              <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-primary" />{plans.filter((p) => ['recommended', 'reviewed', 'verified', 'finalized'].includes(p.status)).length} in progress</span>
-              <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-muted-foreground" />{plans.filter((p) => p.status === 'draft').length} draft</span>
+              <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-success" />{allPlans.filter((p) => p.status === 'approved').length} approved</span>
+              <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-primary" />{allPlans.filter((p) => ['recommended', 'reviewed', 'verified', 'finalized'].includes(p.status)).length} in progress</span>
+              <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-muted-foreground" />{allPlans.filter((p) => p.status === 'draft').length} draft</span>
             </div>
           </div>
         </CardContent>
       </Card>
+
+      {/* Create Plan Dialog */}
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent className="sm:max-w-[440px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <CalendarPlus className="h-4 w-4 text-primary" />
+              Create New Plan
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Define the planning window. Add blocks from the Planning view, then run AI optimization to fill this plan.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3.5 py-1">
+            <div className="space-y-1.5">
+              <Label htmlFor="plan-name" className="text-xs font-medium">Plan Name <span className="text-red-500">*</span></Label>
+              <Input
+                id="plan-name"
+                value={newPlanName}
+                onChange={(e) => setNewPlanName(e.target.value)}
+                placeholder="e.g. Weekly Block Plan — March Week 2"
+                className="text-sm h-9"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium">Plan Type</Label>
+                <Select value={newPlanType} onValueChange={(v) => setNewPlanType(v as 'weekly' | 'monthly')}>
+                  <SelectTrigger className="text-xs h-9"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="weekly">Weekly</SelectItem>
+                    <SelectItem value="monthly">Monthly</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium">Created By</Label>
+                <div className="flex items-center h-9 px-3 rounded-md border border-input bg-muted/40 text-xs text-muted-foreground truncate">
+                  {currentUserName || 'You'}
+                </div>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="plan-start" className="text-xs font-medium">Start Date <span className="text-red-500">*</span></Label>
+                <Input id="plan-start" type="date" value={newPlanStart} onChange={(e) => setNewPlanStart(e.target.value)} className="text-sm h-9" />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="plan-end" className="text-xs font-medium">End Date <span className="text-red-500">*</span></Label>
+                <Input id="plan-end" type="date" value={newPlanEnd} onChange={(e) => setNewPlanEnd(e.target.value)} className="text-sm h-9" />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="plan-notes" className="text-xs font-medium">Notes (optional)</Label>
+              <Input
+                id="plan-notes"
+                value={newPlanNotes}
+                onChange={(e) => setNewPlanNotes(e.target.value)}
+                placeholder="e.g. Prioritise NDLS-GZB track renewal blocks"
+                className="text-sm h-9"
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" size="sm" onClick={() => setCreateOpen(false)}>Cancel</Button>
+            <Button size="sm" onClick={handleCreatePlan} className="gap-1.5">
+              <Plus className="h-3.5 w-3.5" />
+              Create Plan
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Custom Plan Confirmation */}
+      <AlertDialog open={!!deletePlanId} onOpenChange={(open) => { if (!open) setDeletePlanId(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-base">Delete this plan?</AlertDialogTitle>
+            <AlertDialogDescription className="text-xs">
+              "
+              {customPlans.find((p) => p.id === deletePlanId)?.name}
+              " will be permanently removed from this device. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="h-8 text-xs">Cancel</AlertDialogCancel>
+            <AlertDialogAction className="h-8 text-xs bg-red-600 hover:bg-red-700 text-white" onClick={handleDeletePlan}>
+              Delete Plan
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
