@@ -2148,3 +2148,46 @@ Stage Summary:
 - All buttons functional; team demo names untouched (Dhittika, Jeet, Diya, Debarshi, Rupam, Alivia)
 - Unresolved/risks: (1) /api/users is admin-only — non-admin Settings access doesn't exist in nav so no exposure, but if settings is ever opened for planners the tab will show "Device-only" fallback (graceful); (2) audit view merge shows seeded DB entries with LIVE chip too (semantically correct — they are server records; slight visual duplication with simulated entries of same actions); (3) same OOM caveat as before — keep edit+test cycles lean; (4) user status overrides for TEAM accounts remain localStorage-only by design
 - Next round suggestions: (1) drag-and-drop block rescheduling on the Planning timeline (long-standing suggestion, biggest UX win left); (2) audit view pagination/load-more for the live feed + auto-refresh (e.g. refetch on view focus); (3) per-custom-plan print layout ("Corridor Summary" A4 sheet) complementing the existing JSON/CSV/PDF exports; (4) USER_INVITED entries could carry the invited user's id in entityId (currently the acting admin's DB user is attributed via userName only)
+
+---
+Task ID: cron-review-5
+Agent: main (Z.ai Code, webDevReview cron)
+Task: QA pass + drag-and-drop block rescheduling (top suggestion from cron-review-4) + audit live-feed pagination/auto-refresh + per-plan Corridor Summary A4 print sheet + styling polish
+
+Work Log:
+- QA baseline: server healthy, all views render, 0 console errors on fresh session; team demo accounts intact on the auth form (Dhittika/Jeet/Diya/Debarshi/Rupam/Alivia with exact roles)
+- OOM incident: next-server killed twice (RSS ~1.8–1.9GB) while Chrome + dev + lint ran together. Learned fixes: (a) close the agent-browser Chrome before linting/restarts, (b) after an OOM restart a STALE turbopack persistent cache served an outdated globals.css chunk under the same URL — `rm -rf .next/dev/cache` + restart was required to un-stick it (plain touch/reload did NOT). Recommend this as the standard recovery when served CSS does not match the file on disk.
+
+- NEW FEATURE A — Drag-and-drop block rescheduling on the Planning timeline (long-standing #1 suggestion):
+  * block-timeline.tsx: pointer-based horizontal drag for manual/custom blocks only (gated by isManual flag or custom- id prefix — standard blk-* blocks stay locked, verified). 4px press threshold so click-to-select still works; suppressClickRef prevents the post-drag synthetic click from toggling selection
+  * 15-minute snap grid (0.25h) with clamp to [0, 24h − duration]; live saffron snap guides + floating time chip ("HH:MM → HH:MM") + dashed ghost outline at the original slot + dimmed/desaturated siblings while dragging; dragged block gets saffron ring + scale + shadow
+  * Keyboard a11y: Shift+←/→ nudges a focused movable block by 15 min; aria-labels mention draggability; hover card shows "Drag to reschedule · Shift + ←/→ nudges 15 min" hint; legend gained "Drag custom blocks" entry; persistent grip handle on movable blocks (content padded pl-4)
+  * BUG FIXED during E2E: "Cannot update a component (PlanningView) while rendering (BlockTimeline)" — endDrag called onMoveBlock inside the setDrag updater. Fixed with dragValueRef mirror so commit-time side effects run outside updaters. Verified: repeated drags on clean sessions produce ZERO console errors (the warning had also been haunting stale HMR tabs; fresh loads are clean)
+  * planning-view.tsx handleMoveBlock: updates state + localStorage + server; toast "Block rescheduled — HH:MM → HH:MM (saved to server)"
+  * API: PATCH /api/manual-blocks/[id] (auth admin/planner) updates startTime/endTime/duration and writes a BLOCK_RESCHEDULED audit entry with old → new window; lib gained updateServerManualBlock + updateLocalManualBlock
+  * E2E VERIFIED (agent-browser pointer-event dispatch): 02:00→06:00 (+4h) with PATCH 200, localStorage updated, timeline repositioned; keyboard nudge 06:00→06:15 verified; standard blk-001 unmoved; audit trail shows "Rescheduled "Manual Block — NDLS-GZB Engineering" on NDLS-GZB: 02:00–05:00 → 06:00–09:00 (180 min)"
+  * A demo manual block ("Manual Block — NDLS-GZB Engineering", custom-1789143571280, now 17:15–20:15 on 2025-01-27) was left in the DB intentionally so the feature is demoable on first open
+
+- NEW FEATURE B — Audit live feed: auto-refresh + load-more (closes cron-review-4 suggestion #2):
+  * fetchPage(offset, mode) refactor: 'replace' refreshes newest page (manual Refresh button with spinning RotateCw + last-refreshed tooltip, 20s polling interval, visibilitychange refetch), 'append' id-dedupes older pages for the Load more button ("Load more (N older on server)"); LIVE badge now shows server total (pagination.total); footer note "Showing all N server-recorded entries · auto-refreshes every 20s"; BLOCK_RESCHEDULED badge (amber) added
+  * Verified: LIVE · 24 server, Refresh click OK, footer note present; load-more correctly hidden while hasMore=false (24 < 50 page size)
+
+- NEW FEATURE C — Per-plan "Corridor Summary" A4 print sheet (closes cron-review-4 suggestion #3):
+  * New corridor-summary-print.tsx: official Government-of-India letterhead (bilingual), plan identification table (name/type/period/version-status/prepared-by/sections/notes), 5 stat boxes, Section A block schedule (sorted, ◆ AI markers, full dept names), Section B linked maintenance requests (Score + S&T labels), Section C three-column sign-off (Jeet / Diya / Debarshi with role titles + signature lines), confidential footer
+  * Trigger: printer icon button on EVERY plan card (standard + custom). Component mounts → body.printing-single-plan → auto window.print() → afterprint clears state
+  * Print CSS (globals.css): .corridor-summary-print hidden on screen; body.printing-single-plan hides plans-regular-content, PrintHeader, government header/footer (new government-print-header/footer hook classes), TopBar ([role="banner"]) and the prototype banner (new .prototype-banner class) — print output is ONLY the A4 sheet; @page margins 8mm/10mm
+  * VERIFIED via CDP print-to-PDF: single clean page, all app chrome hidden, letterhead → tables → sign-off all fit one page. Artifact saved: download/corridor-summary-final.pdf
+
+- STYLING POLISH (mandatory): drag focus effect (siblings dim to opacity-50 saturate-50), persistent 35%-opacity grip on movable blocks, saffron snap grid + time chip + ghost, "Drag custom blocks" legend entry, audit Refresh spinner + Load-more loading state, dark-mode verified for all new elements (screenshots light + dark)
+
+Verification Results (agent-browser + DB + CDP PDF):
+- Drag E2E ×5 across sessions: consistent, zero console errors after the setState fix
+- Keyboard nudge ✓, standard-block lock ✓, PATCH 200 + BLOCK_RESCHEDULED audit ✓
+- Audit refresh/pagination UI ✓; per-plan print PDF clean single page ✓
+- bun run lint: 0 errors; dev.log clean 200s; team names untouched everywhere
+
+Stage Summary:
+- Shipped the three top suggestions from cron-review-4: drag-and-drop rescheduling (pointer + keyboard, persisted client+server+audit), audit live-feed auto-refresh/load-more, per-plan Corridor Summary A4 print sheet — plus a real React bug fix (setState-in-render) and the turbopack stale-cache recovery recipe
+- All buttons functional; demo data includes one manual block to showcase dragging
+- Unresolved/risks: (1) OOM remains the main hazard — Chrome + dev + lint in parallel WILL eventually kill next-server at 4GB; close the browser for heavy ops and use the .next/dev/cache reset if CSS goes stale; (2) manual blocks with planId pointing at STANDARD plans are allowed by design (block created while a standard plan is active) — audit attribution uses entityId so no FK issues; (3) drag is horizontal-only (no lane changes) by design; (4) print sheet uses inline styles (not Tailwind) deliberately — print output ignores theme
+- Next round suggestions: (1) conflict feedback during drag (live overlap detection vs other blocks/trains with a warning chip in the time tooltip); (2) drag handle on Gantt view rows for the same reschedule affordance there; (3) undo for drag commits (toast Undo restoring previous window, like approvals batch undo); (4) audit view: server-side action filter pushdown (currently fetches pages then filters client-side)

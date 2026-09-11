@@ -3,7 +3,7 @@
 import { useState, useCallback, useMemo, useEffect } from 'react'
 import { plans, blocks, conflicts, maintenanceRequests, corridors, type SimBlock, type SimPlan } from '@/data/simulated-data'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { loadCustomPlans, addBlockToCustomPlan, loadManualBlocks, persistManualBlocks, migrateLocalCustomPlans, migrateLocalManualBlocks, createServerManualBlock, linkServerCustomPlanBlock, type CustomPlan } from '@/lib/custom-plans'
+import { loadCustomPlans, addBlockToCustomPlan, loadManualBlocks, persistManualBlocks, migrateLocalCustomPlans, migrateLocalManualBlocks, createServerManualBlock, linkServerCustomPlanBlock, updateServerManualBlock, type CustomPlan } from '@/lib/custom-plans'
 import { useAppStore } from '@/store/app-store'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -290,6 +290,37 @@ export function PlanningView() {
     })
     handleSelectBlock(newBlock.id)
   }
+
+  // Drag-and-drop / keyboard reschedule of a manual block on the timeline.
+  // newStartH is snapped to 15 min and clamped to [0, 24h − duration] by the timeline.
+  const handleMoveBlock = useCallback((blockId: string, newStartH: number) => {
+    const block = customBlocks.find((b) => b.id === blockId)
+    if (!block) return
+    const durationMin = Math.max(block.duration, 15)
+    const startTotal = Math.round(newStartH * 60)
+    const endTotal = Math.min(24 * 60, startTotal + durationMin)
+    const pad = (n: number) => n.toString().padStart(2, '0')
+    const sh = Math.floor(startTotal / 60)
+    const sm = startTotal % 60
+    const eh = Math.floor(endTotal / 60)
+    const em = endTotal % 60
+    const startTime = `${selectedDate}T${pad(sh)}:${pad(sm)}:00`
+    const endTime = `${selectedDate}T${pad(eh)}:${pad(em)}:00`
+    if (startTime === block.startTime && endTime === block.endTime) return
+
+    const oldLabel = block.startTime.split('T')[1]?.slice(0, 5) ?? ''
+    const duration = endTotal - startTotal
+    setCustomBlocks((prev) =>
+      prev.map((b) => (b.id === blockId ? { ...b, startTime, endTime, duration } : b))
+    )
+    persistManualBlocks(
+      customBlocks.map((b) => (b.id === blockId ? { ...b, startTime, endTime, duration } : b)) as (SimBlock & { isManual: true })[]
+    )
+    void updateServerManualBlock(blockId, { startTime, endTime, duration })
+    toast.success('Block rescheduled', {
+      description: `${block.name}: ${oldLabel} → ${pad(sh)}:${pad(sm)} (saved to server)`,
+    })
+  }, [customBlocks, selectedDate])
 
   // Effective plan block ids — applies the section/department filters + manual blocks
   const effectivePlanBlockIds = useMemo(() => {
@@ -715,6 +746,7 @@ export function PlanningView() {
                   onSelectBlock={handleSelectBlock}
                   planBlockIds={effectivePlanBlockIds}
                   extraBlocks={customBlocks}
+                  onMoveBlock={handleMoveBlock}
                 />
               </div>
             ) : (

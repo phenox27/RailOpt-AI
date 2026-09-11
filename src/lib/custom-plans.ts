@@ -170,6 +170,33 @@ export async function createServerManualBlock(block: ManualBlock): Promise<boole
   }
 }
 
+/** Patch a manual block on the server (used by drag-and-drop rescheduling). */
+export async function updateServerManualBlock(
+  id: string,
+  patch: { startTime: string; endTime: string; duration: number }
+): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/manual-blocks/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
+/** Immutable local (localStorage) time update for a manual block. Returns the updated list. */
+export function updateLocalManualBlock(
+  id: string,
+  patch: { startTime: string; endTime: string; duration: number }
+): ManualBlock[] {
+  const list = loadManualBlocks().map((b) => (b.id === id ? { ...b, ...patch } : b))
+  persistManualBlocks(list)
+  return list
+}
+
 export async function migrateLocalManualBlocks(local: ManualBlock[]): Promise<ManualBlock[]> {
   const server = await fetchServerManualBlocks()
   const serverIds = new Set(server.map((b) => b.id))

@@ -12,7 +12,7 @@ export function GovernmentFooter() {
   const currentYear = new Date().getFullYear()
 
   return (
-    <footer className="shrink-0 w-full border-t border-border/60" role="contentinfo">
+    <footer className="shrink-0 w-full border-t border-border/60 government-print-footer" role="contentinfo">
       {/* Top tricolor strip */}
       <div className="flex h-[2px] w-full" aria-hidden="true">
         <div className="flex-1 bg-[#FF9933]/50" />

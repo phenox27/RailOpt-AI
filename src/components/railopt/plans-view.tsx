@@ -26,6 +26,7 @@ import { useAppStore } from '@/store/app-store'
 import { useDeepLink } from '@/hooks/use-deep-link'
 import { FileText, Calendar, CalendarClock, GitBranch, Clock, CheckCircle2, AlertCircle, ChevronRight, Download, Share2, Printer, FileDown, GitCompare, Trophy, Sparkles, ShieldAlert, Plus, Trash2, CalendarPlus, Boxes, Gauge, Bot, Database, HardDrive, Loader2 } from 'lucide-react'
 import { PrintHeader } from './print-header'
+import { CorridorSummaryPrint } from './corridor-summary-print'
 import { EmptyState } from './empty-state'
 import { toast } from 'sonner'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -348,6 +349,8 @@ export function PlansView() {
   const [newPlanEnd, setNewPlanEnd] = useState('')
   const [newPlanNotes, setNewPlanNotes] = useState('')
   const [deletePlanId, setDeletePlanId] = useState<string | null>(null)
+  // Per-plan "Corridor Summary" print mode (hidden A4 sheet; see corridor-summary-print.tsx)
+  const [printPlanId, setPrintPlanId] = useState<string | null>(null)
   // Server sync state: null = unknown, true = DB-backed, false = device-only
   const [serverSynced, setServerSynced] = useState<boolean | null>(null)
 
@@ -487,18 +490,36 @@ export function PlansView() {
     setCreateOpen(true)
   }
 
+  const printPlan = printPlanId ? allPlans.find((p) => p.id === printPlanId) ?? null : null
+  const printPlanBlocks = printPlan ? knownBlocks.filter((b) => printPlan.blockIds.includes(b.id)) : []
+  const printPlanRequests = printPlan
+    ? maintenanceRequests.filter((mr) => printPlanBlocks.some((b) => b.maintenanceReqIds.includes(mr.id)))
+    : []
+
   const handlePrint = () => {
     window.print()
   }
 
   return (
-    <div className="p-3 sm:p-6 space-y-4 sm:space-y-6 print-area">
+    <div className={`p-3 sm:p-6 print-area ${printPlanId ? 'printing-single-plan' : ''}`}>
       {/* Print Header - hidden on screen, visible when printing */}
       <PrintHeader
         title="RailOpt AI — Block Planning Report"
         corridor="Delhi–Howrah & Delhi–Mumbai"
         planName="All Plans"
       />
+
+      {/* Single-plan Corridor Summary print sheet (screen: hidden · print: exclusive) */}
+      {printPlan && (
+        <CorridorSummaryPrint
+          plan={printPlan}
+          blocks={printPlanBlocks}
+          requests={printPlanRequests}
+          onDone={() => setPrintPlanId(null)}
+        />
+      )}
+
+      <div className="plans-regular-content space-y-4 sm:space-y-6">
       {/* Header */}
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
@@ -648,6 +669,16 @@ export function PlansView() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-muted-foreground hover:text-[#283593] hover:bg-[#e8eaf6] dark:hover:bg-[#0d1442]/40"
+                      aria-label={`Print corridor summary for ${plan.name}`}
+                      title="Print Corridor Summary (A4)"
+                      onClick={() => setPrintPlanId(plan.id)}
+                    >
+                      <Printer className="h-3.5 w-3.5" />
+                    </Button>
                     {isCustomPlan && (
                       <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-5 bg-[#fff7ed] text-[#c2570b] border-[#fdba74] dark:bg-orange-950/30 dark:text-orange-400 dark:border-orange-800">
                         <CalendarPlus className="h-2.5 w-2.5 mr-0.5" />
@@ -984,6 +1015,7 @@ export function PlansView() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      </div>
     </div>
   )
 }

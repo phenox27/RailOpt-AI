@@ -4,7 +4,7 @@ import { useMemo, useState, useRef, useCallback } from 'react'
 import { SimBlock, SimConflict, blocks, conflicts } from '@/data/simulated-data'
 import { Badge } from '@/components/ui/badge'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
-import { AlertTriangle, Bot, Clock, MapPin, GripVertical } from 'lucide-react'
+import { AlertTriangle, Bot, Clock, MapPin, GripVertical, MoveHorizontal } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { motion } from 'framer-motion'
 
@@ -38,12 +38,27 @@ const DEPT_LEGEND_COLORS: Record<string, string> = {
   combined: '#8B5CF6',
 }
 
+const TOTAL_HOURS = 24
+const LANE_HEIGHT = 52
+const HEADER_HEIGHT = 28
+const LANE_GAP = 6
+const SNAP_H = 0.25 // 15-minute snap grid
+const DRAG_THRESHOLD_PX = 4 // px before a press becomes a drag (click still selects)
+
 interface BlockTimelineProps {
   selectedDate: string
   selectedBlockId: string | null
   onSelectBlock: (blockId: string | null) => void
   planBlockIds?: string[]
   extraBlocks?: SimBlock[]
+  /** When provided, manual (custom-*) blocks can be dragged horizontally to reschedule. */
+  onMoveBlock?: (blockId: string, newStartH: number) => void
+}
+
+/** A manual block is draggable: DB-loaded blocks carry isManual, localStorage ones use the custom- id prefix. */
+function isMovable(block: SimBlock, canMove: boolean): boolean {
+  if (!canMove) return false
+  return (block as { isManual?: boolean }).isManual === true || block.id.startsWith('custom-')
 }
 
 // Parse ISO time to hours (e.g. "2025-01-27T01:00:00" -> 1.0)
@@ -99,9 +114,31 @@ function assignLanes(dayBlocks: SimBlock[]): TimelineLane[] {
   return lanes.map((blocks, idx) => ({ laneIndex: idx, blocks }))
 }
 
-export function BlockTimeline({ selectedDate, selectedBlockId, onSelectBlock, planBlockIds, extraBlocks }: BlockTimelineProps) {
+interface DragState {
+  blockId: string
+  origStartH: number
+  durationH: number
+  deltaH: number // snapped shift, may be 0
+  active: boolean // passed the movement threshold
+}
+
+export function BlockTimeline({ selectedDate, selectedBlockId, onSelectBlock, planBlockIds, extraBlocks, onMoveBlock }: BlockTimelineProps) {
   const [hoveredBlockId, setHoveredBlockId] = useState<string | null>(null)
+  const [drag, setDrag] = useState<DragState | null>(null)
   const timelineRef = useRef<HTMLDivElement>(null)
+  const dragRef = useRef<{
+    blockId: string
+    origStartH: number
+    durationH: number
+    startX: number
+    widthPx: number
+    moved: boolean
+  } | null>(null)
+  // Mirrors the latest committed drag state so commit-time side effects
+  // (calling onMoveBlock) never run inside a setState updater.
+  const dragValueRef = useRef<DragState | null>(null)
+  // Suppresses the synthetic click that follows a completed drag pointerup.
+  const suppressClickRef = useRef(false)
 
   // Filter blocks for the selected day and plan (including locally created blocks)
   const dayBlocks = useMemo(() => {
@@ -114,6 +151,69 @@ export function BlockTimeline({ selectedDate, selectedBlockId, onSelectBlock, pl
   }, [selectedDate, planBlockIds, extraBlocks])
 
   const lanes = useMemo(() => assignLanes(dayBlocks), [dayBlocks])
+
+  const clampStart = useCallback((startH: number, durationH: number) => {
+    return Math.min(Math.max(0, startH), TOTAL_HOURS - durationH)
+  }, [])
+
+  // ---- Drag to reschedule (manual blocks only) ----
+
+  const handleDragPointerDown = useCallback((e: React.PointerEvent<HTMLButtonElement>, block: SimBlock) => {
+    if (!onMoveBlock || e.button !== 0) return
+    const laneEl = e.currentTarget.closest('[data-lane]') as HTMLElement | null
+    const widthPx = (laneEl ?? e.currentTarget).getBoundingClientRect().width
+    if (widthPx <= 0) return
+    dragRef.current = {
+      blockId: block.id,
+      origStartH: timeToHours(block.startTime),
+      durationH: Math.max(block.duration, 15) / 60,
+      startX: e.clientX,
+      widthPx,
+      moved: false,
+    }
+  }, [onMoveBlock])
+
+  const handleDragPointerMove = useCallback((e: React.PointerEvent<HTMLButtonElement>) => {
+    const st = dragRef.current
+    if (!st) return
+    const dx = e.clientX - st.startX
+    if (!st.moved && Math.abs(dx) < DRAG_THRESHOLD_PX) return
+    st.moved = true
+    const rawDelta = (dx / st.widthPx) * TOTAL_HOURS
+    const deltaH = Math.round(rawDelta / SNAP_H) * SNAP_H
+    const nextDelta = clampStart(st.origStartH + deltaH, st.durationH) - st.origStartH
+    const prev = dragValueRef.current
+    if (prev && prev.blockId === st.blockId && prev.deltaH === nextDelta && prev.active) return
+    const next: DragState = { blockId: st.blockId, origStartH: st.origStartH, durationH: st.durationH, deltaH: nextDelta, active: true }
+    dragValueRef.current = next
+    setDrag(next)
+  }, [clampStart])
+
+  const endDrag = useCallback((commit: boolean) => {
+    const st = dragRef.current
+    const current = dragValueRef.current
+    suppressClickRef.current = st?.moved === true
+    if (commit && st && current && current.blockId === st.blockId && current.active && current.deltaH !== 0) {
+      onMoveBlock?.(st.blockId, current.origStartH + current.deltaH)
+    }
+    dragValueRef.current = null
+    dragRef.current = null
+    setDrag(null)
+  }, [onMoveBlock])
+
+  const handleDragPointerUp = useCallback(() => endDrag(true), [endDrag])
+  const handleDragPointerCancel = useCallback(() => endDrag(false), [endDrag])
+
+  // Keyboard nudge (Shift+←/→ moves a focused manual block by 15 min)
+  const handleBlockKeyDown = useCallback((e: React.KeyboardEvent<HTMLButtonElement>, block: SimBlock) => {
+    if (!onMoveBlock || !(e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight'))) return
+    e.preventDefault()
+    e.stopPropagation()
+    const durationH = Math.max(block.duration, 15) / 60
+    const orig = timeToHours(block.startTime)
+    const next = clampStart(orig + (e.key === 'ArrowRight' ? SNAP_H : -SNAP_H), durationH)
+    if (next !== orig) onMoveBlock(block.id, next)
+  }, [onMoveBlock, clampStart])
 
   // Arrow key navigation for block items
   const handleTimelineKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -148,11 +248,6 @@ export function BlockTimeline({ selectedDate, selectedBlockId, onSelectBlock, pl
   // Current time indicator
   const currentHour = new Date().getHours() + new Date().getMinutes() / 60
   const nowPct = (currentHour / 24) * 100
-
-  const TOTAL_HOURS = 24
-  const LANE_HEIGHT = 52
-  const HEADER_HEIGHT = 28
-  const LANE_GAP = 6
 
   if (dayBlocks.length === 0) {
     return (
@@ -202,6 +297,18 @@ export function BlockTimeline({ selectedDate, selectedBlockId, onSelectBlock, pl
                 style={{ left: `${(i / TOTAL_HOURS) * 100}%` }}
               />
             ))}
+            {/* 15-min snap guides while dragging */}
+            {drag?.active && (
+              <div className="absolute inset-0 opacity-30" aria-hidden="true">
+                {Array.from({ length: TOTAL_HOURS * 4 + 1 }, (_, i) => (
+                  <div
+                    key={`snap-${i}`}
+                    className="absolute top-0 bottom-0 w-px bg-[#FF9933]/50"
+                    style={{ left: `${((i * SNAP_H) / TOTAL_HOURS) * 100}%` }}
+                  />
+                ))}
+              </div>
+            )}
             {/* Current time indicator with pulse animation */}
             <motion.div
               className="absolute top-0 bottom-0 w-0.5 bg-red-500 z-10"
@@ -232,6 +339,7 @@ export function BlockTimeline({ selectedDate, selectedBlockId, onSelectBlock, pl
           {lanes.map((lane) => (
             <div
               key={`lane-${lane.laneIndex}`}
+              data-lane
               className="relative"
               style={{
                 height: LANE_HEIGHT,
@@ -249,8 +357,6 @@ export function BlockTimeline({ selectedDate, selectedBlockId, onSelectBlock, pl
               {lane.blocks.map((block) => {
                 const startH = timeToHours(block.startTime)
                 const endH = timeToHours(block.endTime)
-                const leftPct = (startH / TOTAL_HOURS) * 100
-                const widthPct = ((endH - startH) / TOTAL_HOURS) * 100
                 const isSelected = selectedBlockId === block.id
                 const isHovered = hoveredBlockId === block.id
                 const blockConflicts = getBlockConflicts(block.id)
@@ -260,13 +366,24 @@ export function BlockTimeline({ selectedDate, selectedBlockId, onSelectBlock, pl
                 const lightColors = DEPT_LIGHT_COLORS[dept] || DEPT_LIGHT_COLORS.combined
                 const deptLabel = DEPT_LABELS[dept] || dept.toUpperCase().slice(0, 4)
 
+                // ---- Drag state for this block ----
+                const movable = isMovable(block, !!onMoveBlock)
+                const isDragging = drag?.active === true && drag.blockId === block.id
+                const shownStartH = isDragging ? drag.origStartH + drag.deltaH : startH
+                const shownEndH = isDragging ? shownStartH + drag.durationH : endH
+                const leftPct = (shownStartH / TOTAL_HOURS) * 100
+                const widthPct = ((shownEndH - shownStartH) / TOTAL_HOURS) * 100
+                const origLeftPct = (startH / TOTAL_HOURS) * 100
+                const origWidthPct = ((endH - startH) / TOTAL_HOURS) * 100
+
                 return (
-                  <HoverCard key={block.id} open={isHovered ? undefined : false}>
+                  <HoverCard key={block.id} open={isDragging ? false : isHovered ? undefined : false}>
                     <HoverCardTrigger asChild>
                       <motion.button
                         data-block-id={block.id}
                         className={cn(
-                          'absolute top-1 bottom-1 text-left cursor-pointer transition-all duration-150 outline-none group/block',
+                          'absolute top-1 bottom-1 text-left transition-all duration-150 outline-none group/block',
+                          movable ? (isDragging ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-pointer',
                           'focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1',
                           // Rounded corners and shadows
                           'rounded-lg shadow-sm',
@@ -276,27 +393,44 @@ export function BlockTimeline({ selectedDate, selectedBlockId, onSelectBlock, pl
                             : cn(colors.bg, 'border border-solid', colors.border),
                           isSelected && 'ring-2 ring-offset-1 ring-offset-background ring-[#1a237e] shadow-md',
                           isHovered && !isSelected && 'ring-1 ring-offset-1 ring-offset-background ring-[#3f51b5]/60 shadow-md',
+                          isDragging && 'z-20 shadow-xl ring-2 ring-[#FF9933] ring-offset-1 ring-offset-background brightness-110 saturate-150',
+                          // Focus effect: dim everything else while a drag is in progress
+                          drag?.active && !isDragging && 'opacity-50 saturate-50',
                         )}
                         style={{
                           left: `${leftPct}%`,
                           width: `${widthPct}%`,
+                          touchAction: movable ? 'none' : undefined,
                         }}
-                        whileHover={{
+                        whileHover={isDragging ? undefined : {
                           boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
                           y: -1,
                         }}
+                        animate={isDragging ? { scale: 1.02 } : { scale: 1 }}
                         transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-                        onClick={() => onSelectBlock(isSelected ? null : block.id)}
+                        onClick={() => {
+                          // A completed drag must not also toggle selection
+                          if (suppressClickRef.current) {
+                            suppressClickRef.current = false
+                            return
+                          }
+                          onSelectBlock(isSelected ? null : block.id)
+                        }}
                         onMouseEnter={() => setHoveredBlockId(block.id)}
                         onMouseLeave={() => setHoveredBlockId(null)}
-                        aria-label={`${block.name}, ${block.department}, ${formatHour(startH)} to ${formatHour(endH)}${hasConflict ? ', has conflicts' : ''}`}
-                        layout
+                        onPointerDown={movable ? (e) => handleDragPointerDown(e, block) : undefined}
+                        onPointerMove={movable ? handleDragPointerMove : undefined}
+                        onPointerUp={movable ? handleDragPointerUp : undefined}
+                        onPointerCancel={movable ? handleDragPointerCancel : undefined}
+                        onKeyDown={movable ? (e) => handleBlockKeyDown(e, block) : undefined}
+                        aria-label={`${block.name}, ${block.department}, ${formatHour(shownStartH)} to ${formatHour(shownEndH)}${hasConflict ? ', has conflicts' : ''}${movable ? ', drag or press Shift with arrow keys to reschedule' : ''}`}
+                        layout={false}
                       >
-                        {/* Hover glow effect */}
-                        <div className="absolute inset-0 rounded-lg opacity-0 group-hover/block:opacity-100 transition-opacity duration-300 pointer-events-none bg-gradient-to-b from-white/20 to-transparent" />
-
-                        {/* Drag handle indicator on hover */}
-                        <div className="absolute left-0 top-0 bottom-0 w-4 flex items-center justify-center opacity-0 group-hover/block:opacity-60 transition-opacity duration-150 pointer-events-none">
+                        {/* Drag handle indicator — persistent on movable blocks, hover-only otherwise */}
+                        <div className={cn(
+                          'absolute left-0 top-0 bottom-0 w-4 flex items-center justify-center transition-opacity duration-150 pointer-events-none',
+                          movable ? 'opacity-35 group-hover/block:opacity-90' : 'opacity-0 group-hover/block:opacity-60',
+                        )}>
                           <GripVertical className={cn(
                             'h-3 w-3',
                             block.isAiRecommended ? lightColors.text : 'text-white/60',
@@ -304,7 +438,7 @@ export function BlockTimeline({ selectedDate, selectedBlockId, onSelectBlock, pl
                         </div>
 
                         {/* Block content */}
-                        <div className="flex items-center gap-1 px-2 h-full overflow-hidden">
+                        <div className={cn('flex items-center gap-1 h-full overflow-hidden', movable ? 'pl-4 pr-2' : 'px-2')}>
                           {/* Department label */}
                           <span className={cn(
                             'text-[9px] font-bold uppercase shrink-0 px-1 py-0.5 rounded-sm',
@@ -345,7 +479,7 @@ export function BlockTimeline({ selectedDate, selectedBlockId, onSelectBlock, pl
                         </div>
                         <div className="flex items-center gap-1.5 text-muted-foreground">
                           <Clock className="h-3 w-3" />
-                          <span>{formatHour(startH)} – {formatHour(endH)} ({block.duration} min)</span>
+                          <span>{formatHour(shownStartH)} – {formatHour(shownEndH)} ({block.duration} min)</span>
                         </div>
                         <div className="flex items-center gap-1.5 text-muted-foreground">
                           <MapPin className="h-3 w-3" />
@@ -374,11 +508,45 @@ export function BlockTimeline({ selectedDate, selectedBlockId, onSelectBlock, pl
                             ))}
                           </div>
                         )}
+                        {movable && (
+                          <div className="pt-1 border-t border-border flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                            <MoveHorizontal className="h-3 w-3 text-[#c2410c]" />
+                            <span>Drag to reschedule · Shift + ←/→ nudges 15 min</span>
+                          </div>
+                        )}
                       </div>
                     </HoverCardContent>
                   </HoverCard>
                 )
               })}
+
+              {/* Ghost outline at the original slot + live time chip for the block being dragged (rendered inside its lane) */}
+              {drag?.active && lane.blocks.some((b) => b.id === drag.blockId) && (() => {
+                const dragged = lane.blocks.find((b) => b.id === drag.blockId)!
+                const ghostLeft = (timeToHours(dragged.startTime) / TOTAL_HOURS) * 100
+                const ghostWidth = ((Math.max(dragged.duration, 15) / 60) / TOTAL_HOURS) * 100
+                const newStart = drag.origStartH + drag.deltaH
+                return (
+                  <>
+                    <div
+                      className="absolute top-1 bottom-1 rounded-lg border-2 border-dashed border-muted-foreground/40 bg-muted-foreground/5 pointer-events-none"
+                      style={{ left: `${ghostLeft}%`, width: `${ghostWidth}%` }}
+                      aria-hidden="true"
+                    />
+                    {/* Live time chip pinned above the dragged block */}
+                    <div
+                      className="absolute -top-1 z-30 pointer-events-none -translate-x-1/2"
+                      style={{ left: `${((newStart + drag.durationH / 2) / TOTAL_HOURS) * 100}%` }}
+                      role="status"
+                    >
+                      <span className="whitespace-nowrap rounded-md bg-[#c2410c] px-2 py-0.5 text-[10px] font-semibold text-white shadow-lg border border-[#9a3412]">
+                        {formatHour(newStart)} → {formatHour(newStart + drag.durationH)}
+                      </span>
+                      <span className="absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-[#c2410c]" />
+                    </div>
+                  </>
+                )
+              })()}
             </div>
           ))}
         </div>
@@ -421,10 +589,12 @@ export function BlockTimeline({ selectedDate, selectedBlockId, onSelectBlock, pl
             />
             <span className="text-xs text-muted-foreground font-medium">Now</span>
           </span>
-          <span className="flex items-center gap-1.5">
-            <GripVertical className="h-3.5 w-3.5 text-muted-foreground/50" />
-            <span className="text-xs text-muted-foreground font-medium">Drag</span>
-          </span>
+          {onMoveBlock && (
+            <span className="flex items-center gap-1.5">
+              <MoveHorizontal className="h-3.5 w-3.5 text-[#c2410c]" />
+              <span className="text-xs text-muted-foreground font-medium">Drag custom blocks</span>
+            </span>
+          )}
         </div>
       </div>
     </div>

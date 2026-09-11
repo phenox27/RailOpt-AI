@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState, useCallback, useEffect } from 'react'
+import { useMemo, useState, useCallback, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Table,
@@ -21,7 +21,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { auditEntries, type SimAuditEntry } from '@/data/simulated-data'
-import { ScrollText, Filter, ArrowUpDown, Search, Download, ChevronDown, ChevronRight, CalendarRange, Radio } from 'lucide-react'
+import { ScrollText, Filter, ArrowUpDown, Search, Download, ChevronDown, ChevronRight, CalendarRange, Radio, RotateCw, Loader2 } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import { EmptyState } from './empty-state'
 
@@ -72,6 +72,7 @@ const ACTION_BADGE: Record<string, string> = {
   BLOCK_REMOVED_FROM_PLAN: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/30 dark:text-amber-400 dark:border-amber-800/50',
   MANUAL_BLOCK_CREATED: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-400 dark:border-emerald-800/50',
   MANUAL_BLOCK_DELETED: 'bg-red-50 text-red-700 border-red-200 dark:bg-red-950/30 dark:text-red-400 dark:border-red-800/50',
+  BLOCK_RESCHEDULED: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/30 dark:text-amber-400 dark:border-amber-800/50',
   USER_INVITED: 'bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-950/30 dark:text-violet-400 dark:border-violet-800/50',
   USER_UPDATED: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/30 dark:text-amber-400 dark:border-amber-800/50',
   USER_REMOVED: 'bg-red-50 text-red-700 border-red-200 dark:bg-red-950/30 dark:text-red-400 dark:border-red-800/50',
@@ -86,31 +87,72 @@ export function AuditView() {
   const [expandedRow, setExpandedRow] = useState<string | null>(null)
   const [liveEntries, setLiveEntries] = useState<MergedAuditEntry[]>([])
   const [liveStatus, setLiveStatus] = useState<'loading' | 'connected' | 'unavailable'>('loading')
+  const [liveTotal, setLiveTotal] = useState(0)
+  const [hasMore, setHasMore] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null)
+  const loadingMoreRef = useRef(false)
+
+  const PAGE_SIZE = 50
+
+  // Fetch one page of live audit rows. mode 'replace' refreshes the newest page,
+  // 'append' loads the next page after what is already shown.
+  const fetchPage = useCallback(async (offset: number, mode: 'replace' | 'append') => {
+    if (mode === 'append' && loadingMoreRef.current) return
+    if (mode === 'append') loadingMoreRef.current = true
+    if (mode === 'replace') setRefreshing(true)
+    else setLoadingMore(true)
+    try {
+      const res = await fetch(`/api/audit?limit=${PAGE_SIZE}&offset=${offset}`, { cache: 'no-store' })
+      if (!res.ok) {
+        setLiveStatus((s) => (s === 'connected' ? s : 'unavailable'))
+        return
+      }
+      const json = await res.json()
+      const rows: DbAuditEntry[] = Array.isArray(json?.data) ? json.data : []
+      const pagination = json?.pagination as { total?: number; hasMore?: boolean } | undefined
+      const mapped = rows.map(mapDbEntry)
+      if (mode === 'replace') {
+        setLiveEntries(mapped)
+      } else {
+        setLiveEntries((prev) => {
+          const seen = new Set(prev.map((e) => e.id))
+          return [...prev, ...mapped.filter((e) => !seen.has(e.id))]
+        })
+      }
+      setLiveTotal(typeof pagination?.total === 'number' ? pagination.total : offset + mapped.length)
+      setHasMore(pagination?.hasMore === true)
+      setLiveStatus('connected')
+      if (mode === 'replace') setLastRefreshedAt(new Date())
+    } catch {
+      setLiveStatus((s) => (s === 'connected' ? s : 'unavailable'))
+    } finally {
+      loadingMoreRef.current = false
+      setLoadingMore(false)
+      setRefreshing(false)
+    }
+  }, [])
 
   // Hydrate live audit trail from the server (admin-only endpoint; fail soft)
   useEffect(() => {
-    let cancelled = false
-    const t = setTimeout(async () => {
-      try {
-        const res = await fetch('/api/audit?limit=50', { cache: 'no-store' })
-        if (cancelled) return
-        if (!res.ok) {
-          setLiveStatus('unavailable')
-          return
-        }
-        const json = await res.json()
-        const rows: DbAuditEntry[] = Array.isArray(json?.data) ? json.data : []
-        setLiveEntries(rows.map(mapDbEntry))
-        setLiveStatus('connected')
-      } catch {
-        if (!cancelled) setLiveStatus('unavailable')
-      }
-    }, 0)
-    return () => {
-      cancelled = true
-      clearTimeout(t)
+    const t = setTimeout(() => void fetchPage(0, 'replace'), 0)
+    return () => clearTimeout(t)
+  }, [fetchPage])
+
+  // Live tail: poll for new entries every 20s and refresh when the tab regains focus
+  useEffect(() => {
+    if (liveStatus !== 'connected') return
+    const interval = setInterval(() => void fetchPage(0, 'replace'), 20000)
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void fetchPage(0, 'replace')
     }
-  }, [])
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      clearInterval(interval)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [liveStatus, fetchPage])
 
   const allEntries = useMemo<MergedAuditEntry[]>(() => {
     // Live entries first — they carry real timestamps from today and dominate
@@ -215,7 +257,7 @@ export function AuditView() {
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-500 opacity-60" />
                     <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
                   </span>
-                  LIVE · {liveEntries.length} server
+                  LIVE · {liveTotal} server
                 </Badge>
               )}
               {dateRange && (
@@ -227,16 +269,31 @@ export function AuditView() {
             </div>
           </div>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-8 text-xs gap-1.5"
-          onClick={exportCSV}
-          disabled={filteredEntries.length === 0}
-        >
-          <Download className="w-3.5 h-3.5" />
-          Export CSV
-        </Button>
+        <div className="flex items-center gap-2">
+          {liveStatus === 'connected' && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 text-xs gap-1.5 text-muted-foreground"
+              onClick={() => void fetchPage(0, 'replace')}
+              disabled={refreshing}
+              title={lastRefreshedAt ? `Last refreshed ${format(lastRefreshedAt, 'HH:mm:ss')}` : 'Refresh from server'}
+            >
+              <RotateCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+              <span className="hidden sm:inline">{refreshing ? 'Refreshing…' : 'Refresh'}</span>
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 text-xs gap-1.5"
+            onClick={exportCSV}
+            disabled={filteredEntries.length === 0}
+          >
+            <Download className="w-3.5 h-3.5" />
+            Export CSV
+          </Button>
+        </div>
       </div>
 
       {/* Filters - stack vertically on mobile */}
@@ -481,6 +538,31 @@ export function AuditView() {
               },
             }}
           />
+        )}
+
+        {/* Load more (server pagination) */}
+        {hasMore && (
+          <div className="flex justify-center py-3">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9 text-xs gap-1.5 min-h-[44px] sm:min-h-0"
+              onClick={() => void fetchPage(liveEntries.length, 'append')}
+              disabled={loadingMore}
+            >
+              {loadingMore ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <ChevronDown className="w-3.5 h-3.5" />
+              )}
+              {loadingMore ? 'Loading…' : `Load more (${liveTotal - liveEntries.length} older on server)`}
+            </Button>
+          </div>
+        )}
+        {liveStatus === 'connected' && !hasMore && liveEntries.length > 0 && (
+          <p className="text-center text-[10px] text-muted-foreground py-2">
+            Showing all {liveEntries.length} server-recorded entries · auto-refreshes every 20s
+          </p>
         )}
       </div>
     </div>

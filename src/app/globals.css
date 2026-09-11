@@ -729,3 +729,30 @@
 .dark :focus-visible {
   outline-color: #ffb066;
 }
+
+/* ------------------------------------------------------------------ */
+/* Per-plan "Corridor Summary" print sheet (corridor-summary-print)   */
+/* On screen the sheet is never shown; when Plans view is in          */
+/* printing-single-plan mode, printing outputs ONLY the A4 summary.   */
+/* ------------------------------------------------------------------ */
+.corridor-summary-print {
+  display: none;
+}
+@media print {
+  body.printing-single-plan .plans-regular-content,
+  body.printing-single-plan .print-header,
+  body.printing-single-plan .government-print-header,
+  body.printing-single-plan .government-print-footer,
+  body.printing-single-plan [role="banner"],
+  body.printing-single-plan .prototype-banner {
+    display: none !important;
+  }
+  body.printing-single-plan .corridor-summary-print {
+    display: block !important;
+    padding: 4mm 6mm;
+  }
+  /* A4 tuning for the official summary sheet */
+  @page {
+    margin: 8mm 10mm;
+  }
+}

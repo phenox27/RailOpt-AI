@@ -10,7 +10,7 @@ import { motion } from 'framer-motion'
  */
 export function GovernmentHeader() {
   return (
-    <div className="w-full shrink-0">
+    <div className="w-full shrink-0 government-print-header">
       {/* Tricolor strip - saffron / white / green */}
       <div className="flex h-[3px] w-full" aria-hidden="true">
         <div className="flex-1 bg-[#FF9933]" /> {/* Saffron */}

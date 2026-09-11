@@ -131,7 +131,7 @@ function AppShell() {
           <TopBar realtimeConnected={realtimeConnected} />
           <OfflineBanner />
           {/* Prototype Data Indicator */}
-          <div className="flex items-center justify-center py-1 bg-amber-50 dark:bg-amber-950/30 border-b border-amber-200/50 dark:border-amber-800/30">
+          <div className="flex items-center justify-center py-1 bg-amber-50 dark:bg-amber-950/30 border-b border-amber-200/50 dark:border-amber-800/30 prototype-banner">
             <Badge variant="outline" className="text-[10px] px-2 py-0 h-5 border-amber-400 text-amber-700 dark:text-amber-400 bg-amber-100/50 dark:bg-amber-900/30">
               ⚡ Prototype Data — Simulated / Demo
             </Badge>
