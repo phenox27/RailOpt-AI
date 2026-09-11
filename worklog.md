@@ -2191,3 +2191,44 @@ Stage Summary:
 - All buttons functional; demo data includes one manual block to showcase dragging
 - Unresolved/risks: (1) OOM remains the main hazard — Chrome + dev + lint in parallel WILL eventually kill next-server at 4GB; close the browser for heavy ops and use the .next/dev/cache reset if CSS goes stale; (2) manual blocks with planId pointing at STANDARD plans are allowed by design (block created while a standard plan is active) — audit attribution uses entityId so no FK issues; (3) drag is horizontal-only (no lane changes) by design; (4) print sheet uses inline styles (not Tailwind) deliberately — print output ignores theme
 - Next round suggestions: (1) conflict feedback during drag (live overlap detection vs other blocks/trains with a warning chip in the time tooltip); (2) drag handle on Gantt view rows for the same reschedule affordance there; (3) undo for drag commits (toast Undo restoring previous window, like approvals batch undo); (4) audit view: server-side action filter pushdown (currently fetches pages then filters client-side)
+
+---
+Task ID: cron-review-6
+Agent: main (Z.ai Code, webDevReview cron)
+Task: QA pass + drag UX completion round: live conflict feedback during reschedule + Undo for drag commits + Gantt-view drag support (closes cron-review-5 suggestions #1, #2, #3)
+
+Work Log:
+- QA baseline: all admin views swept via agent-browser — 0 console errors; team accounts intact; demo manual block persisted through sign-out/sign-in (DB hydration working as designed)
+
+- NEW FEATURE A — Live conflict feedback during drag (closes suggestion #1):
+  * computeOverlaps() helper (exported, shared with Gantt): names of same-day blocks whose window overlaps the proposed slot
+  * While dragging: time chip turns RED, pulsing, and reads "⚠ Overlaps Block A1…, Block A2… +1" (max 2 names + count); ghost outline turns red; overlapping blocks get a red ring + glow and stay fully saturated while everything else dims; snap guides turn from saffron to red
+  * On commit with conflicts: toast.warning "Block moved — overlaps detected" listing the overlaps; commit still proceeds (planner's decision), never blocks
+  * VERIFIED: dragged demo block into the 01:00–06:00 cluster → chip "⚠ Overlaps Block A1 — NDLS-GZB Engineering, Block A2 — NDLS-GZB Combined +1", 3 red rings visible (screenshot), warning toast correct
+
+- NEW FEATURE B — Undo for drag commits (closes suggestion #3):
+  * handleMoveBlock now captures the previous window and shows sonner toast with Undo action (8s success / 9s warning); Undo restores state + localStorage + server PATCH (and is itself audited as a reschedule by the API)
+  * applyTimes writes localStorage from a FRESH loadManualBlocks() read (not a stale closure) so undo can never clobber concurrent changes
+  * Keyboard nudges (Shift+←/→) are silent on success (no toast spam) but still warn on conflicts; keyboard path now also computes overlaps
+  * VERIFIED: undo click restores exact previous startTime/endTime, "Reschedule reverted" toast shows, PATCH fired; success path toast "Block rescheduled — 00:00 → 17:00 (saved to server) [Undo]"
+
+- NEW FEATURE C — Gantt view drag-to-reschedule (closes suggestion #2):
+  * Same pointer-drag mechanics ported to GanttView bars: onMoveBlock prop (planning-view passes the same handleMoveBlock), 15-min snap, clamp 0–24h, delta conversion uses the group chart-area width × hoursVisible (zoom-aware)
+  * Drag visuals: saffron ring + brightness/saturation on the dragged bar, siblings dim, overlapped bars red-ring, persistent grip handle on movable bars, HoverCard suppressed mid-drag, click-after-drag suppressed; legend entry "Drag custom blocks"
+  * Fixed my own re-introduction of the setState-in-render antipattern in the first draft (side effect inside setGanttDrag updater) — same dragValueRef mirror pattern as the timeline; also fixed a TDZ declaration-order bug (hoursVisible used before declaration) and removed a ref-during-render write after the new react-hooks/refs rule flagged it (endGanttDrag now takes filteredBlocks via deps)
+  * VERIFIED: Gantt drag +3h → 17:00 → 20:00 committed, toast + Undo shown, PATCH 200, bar re-rendered at new slot; standard bars unmoved
+
+- STYLING POLISH (mandatory): red conflict theme across the whole drag surface (chip/ghost/guides/rings), persistent grip handles, drag legends in both views, Gantt toolbar untouched, dark-mode-safe (all new classes are color utilities with good contrast on both themes)
+
+Verification Results (agent-browser):
+- Timeline: conflict drag ✓ (chip/rings/toast), undo round-trip ✓ (00:00 restored), success drag ✓, keyboard-nudge silence ✓
+- Gantt: +3h drag commit ✓, visuals ✓
+- Fresh-session E2E: sign-in → Planning → drag 20:00 → 17:00 → success toast with Undo, console 0 errors/warnings
+- bun run lint: 0 errors (after fixing refs/immutability/declaration-order issues)
+- OOM hit once mid-round (lint + Chrome together) — standard recovery used; lint now always run with the browser closed
+
+Stage Summary:
+- Shipped: conflict-aware drag rescheduling (timeline + Gantt) with live visual feedback, undoable commits, and keyboard-supporting pipeline; drag now consistent across both schedule views
+- All buttons functional; team names untouched; demo manual block left at 17:00–20:00 Mon Jan 27 2025 for demoing
+- Unresolved/risks: (1) OOM discipline required (browser closed for lint); (2) overlap detection is same-day-blocks-only — train timetable conflicts are NOT recomputed live (the pre-existing conflicts data still drives the ⚠ badges); (3) Gantt drag at zoom>1 can move a bar out of the visible window (commit still correct; bar re-appears after release); (4) undo does not remove the extra BLOCK_RESCHEDULED audit entry created by the revert (by design — audit trail is append-only)
+- Next round suggestions: (1) audit view server-side action filter pushdown (fetch with ?action= instead of client-side filtering; needs merge strategy with simulated entries); (2) drag conflict detection vs train timetable events ( enrich chip with train numbers from conflicts data); (3) corridor utilization mini-chart on the Planning right rail that live-updates during drag (shows the freed/reused window); (4) print: per-plan PDF endpoint could accept ?summary=1 to reuse the Corridor Summary layout server-side for a download (current print is client-side only)

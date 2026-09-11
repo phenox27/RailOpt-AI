@@ -1,8 +1,9 @@
 'use client'
 
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, useRef } from 'react'
 import { blocks, conflicts, corridors } from '@/data/simulated-data'
 import type { SimBlock, SimConflict } from '@/data/simulated-data'
+import { computeOverlaps, isMovable } from './block-timeline'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
@@ -86,6 +87,8 @@ interface GanttViewProps {
   onSelectBlock: (blockId: string | null) => void
   planBlockIds?: string[]
   extraBlocks?: SimBlock[]
+  /** When provided, manual (custom-*) blocks can be dragged horizontally to reschedule. */
+  onMoveBlock?: (blockId: string, newStartH: number, conflictBlockNames: string[], source?: 'drag' | 'keyboard') => void
 }
 
 function timeToHours(isoString: string): number {
@@ -123,7 +126,7 @@ function assignLanes(blocksToAssign: SimBlock[]): SimBlock[][] {
   return lanes
 }
 
-export function GanttView({ selectedBlockId, onSelectBlock, planBlockIds, extraBlocks }: GanttViewProps) {
+export function GanttView({ selectedBlockId, onSelectBlock, planBlockIds, extraBlocks, onMoveBlock }: GanttViewProps) {
   // Filters
   const [deptFilter, setDeptFilter] = useState<string>('all')
   const [showAiRecommended, setShowAiRecommended] = useState(true)
@@ -134,7 +137,7 @@ export function GanttView({ selectedBlockId, onSelectBlock, planBlockIds, extraB
   const [groupBy, setGroupBy] = useState<'section' | 'department'>('section')
   const [hoveredBlockId, setHoveredBlockId] = useState<string | null>(null)
 
-  // Zoom controls
+  // Zoom controls (declared before drag handlers that depend on hoursVisible)
   const hoursVisible = zoomLevel === 1 ? 24 : zoomLevel === 2 ? 12 : 6
   const startHour = zoomLevel === 3 ? 6 : 0
 
@@ -150,6 +153,78 @@ export function GanttView({ selectedBlockId, onSelectBlock, planBlockIds, extraB
       return true
     })
   }, [planBlockIds, selectedDate, deptFilter, showAiRecommended, extraBlocks])
+
+  // ---- Drag to reschedule (manual blocks only; same mechanics as BlockTimeline) ----
+  const [ganttDrag, setGanttDrag] = useState<{ blockId: string; deltaH: number } | null>(null)
+  const ganttDragRef = useRef<{
+    blockId: string
+    origStartH: number
+    durationH: number
+    startX: number
+    areaWidthPx: number
+    moved: boolean
+  } | null>(null)
+  // Mirrors latest drag value so commit-time side effects stay out of setState updaters
+  const ganttDragValueRef = useRef<{ blockId: string; deltaH: number } | null>(null)
+  const ganttSuppressClickRef = useRef(false)
+
+  const ganttClampStart = useCallback((startH: number, durationH: number) => {
+    return Math.min(Math.max(0, startH), 24 - durationH)
+  }, [])
+
+  const handleGanttPointerDown = useCallback((e: React.PointerEvent<HTMLButtonElement>, block: SimBlock) => {
+    if (!onMoveBlock || e.button !== 0) return
+    const area = e.currentTarget.closest('[data-gantt-chart-area]') as HTMLElement | null
+    const areaWidthPx = (area ?? e.currentTarget.parentElement)?.getBoundingClientRect().width ?? 0
+    if (areaWidthPx <= 0) return
+    ganttDragRef.current = {
+      blockId: block.id,
+      origStartH: timeToHours(block.startTime),
+      durationH: Math.max(block.duration, 15) / 60,
+      startX: e.clientX,
+      areaWidthPx,
+      moved: false,
+    }
+  }, [onMoveBlock])
+
+  const handleGanttPointerMove = useCallback((e: React.PointerEvent<HTMLButtonElement>) => {
+    const st = ganttDragRef.current
+    if (!st) return
+    const dx = e.clientX - st.startX
+    if (!st.moved && Math.abs(dx) < 4) return
+    st.moved = true
+    const rawDelta = (dx / st.areaWidthPx) * hoursVisible
+    const deltaH = Math.round(rawDelta / 0.25) * 0.25
+    const nextDelta = ganttClampStart(st.origStartH + deltaH, st.durationH) - st.origStartH
+    const prev = ganttDragValueRef.current
+    if (prev && prev.blockId === st.blockId && prev.deltaH === nextDelta) return
+    const next = { blockId: st.blockId, deltaH: nextDelta }
+    ganttDragValueRef.current = next
+    setGanttDrag(next)
+  }, [hoursVisible, ganttClampStart])
+
+  const endGanttDrag = useCallback((commit: boolean) => {
+    const st = ganttDragRef.current
+    const current = ganttDragValueRef.current
+    ganttSuppressClickRef.current = st?.moved === true
+    if (commit && st && current && current.blockId === st.blockId && current.deltaH !== 0) {
+      const newStart = ganttClampStart(st.origStartH + current.deltaH, st.durationH)
+      const conflicts = computeOverlaps(filteredBlocks, st.blockId, newStart, st.durationH)
+      onMoveBlock?.(st.blockId, newStart, conflicts, 'drag')
+    }
+    ganttDragValueRef.current = null
+    ganttDragRef.current = null
+    setGanttDrag(null)
+  }, [onMoveBlock, ganttClampStart, filteredBlocks])
+
+  // Live conflict names while a Gantt bar is being dragged
+  const ganttDragConflicts = useMemo(() => {
+    if (!ganttDrag) return [] as string[]
+    const b = filteredBlocks.find((x) => x.id === ganttDrag.blockId)
+    if (!b) return [] as string[]
+    const start = timeToHours(b.startTime) + ganttDrag.deltaH
+    return computeOverlaps(filteredBlocks, b.id, start, Math.max(b.duration, 15) / 60)
+  }, [ganttDrag, filteredBlocks])
 
   // Compute dynamic dependencies
   const dependencies = useMemo(() => computeDependencies(filteredBlocks), [filteredBlocks])
@@ -366,7 +441,7 @@ export function GanttView({ selectedBlockId, onSelectBlock, planBlockIds, extraB
                   </div>
 
                   {/* Chart Area */}
-                  <div className="flex-1 relative" style={{ height: rowHeight }}>
+                  <div className="flex-1 relative" style={{ height: rowHeight }} data-gantt-chart-area>
                     {/* Major grid lines (hourly) */}
                     {Array.from({ length: hoursVisible + 1 }, (_, i) => (
                       <div
@@ -403,27 +478,33 @@ export function GanttView({ selectedBlockId, onSelectBlock, planBlockIds, extraB
                     {/* Block Bars */}
                     {lanes.map((laneBlocks, laneIdx) =>
                       laneBlocks.map((block, blockIdx) => {
+                        const movable = isMovable(block, !!onMoveBlock)
+                        const isDragBar = ganttDrag?.blockId === block.id
+                        const shownStartH = isDragBar ? timeToHours(block.startTime) + ganttDrag.deltaH : timeToHours(block.startTime)
+                        const shownEndH = isDragBar ? shownStartH + Math.max(block.duration, 15) / 60 : timeToHours(block.endTime)
                         const startH = timeToHours(block.startTime)
                         const endH = timeToHours(block.endTime)
-                        const leftPct = ((startH - startHour) / hoursVisible) * 100
-                        const widthPct = ((endH - startH) / hoursVisible) * 100
+                        const leftPct = ((shownStartH - startHour) / hoursVisible) * 100
+                        const widthPct = ((shownEndH - shownStartH) / hoursVisible) * 100
                         const isSelected = selectedBlockId === block.id
                         const isHovered = hoveredBlockId === block.id
                         const blockConflicts = getBlockConflicts(block.id)
                         const hasConflict = blockConflicts.length > 0
+                        const overlappedWhileDrag = ganttDragConflicts.includes(block.name)
                         const dept = block.department
                         const colors = DEPT_COLORS[dept] || DEPT_COLORS.combined
                         const lightColors = DEPT_LIGHT_COLORS[dept] || DEPT_LIGHT_COLORS.combined
 
                         return (
-                          <HoverCard key={block.id}>
+                          <HoverCard key={block.id} open={isDragBar ? false : undefined}>
                             <HoverCardTrigger asChild>
                               <motion.button
                                 initial={{ opacity: 0, scaleX: 0.8 }}
                                 animate={{ opacity: 1, scaleX: 1 }}
                                 transition={{ duration: 0.2, delay: groupIdx * 0.04 + blockIdx * 0.03 }}
                                 className={cn(
-                                  'absolute text-left cursor-pointer transition-all duration-150 outline-none group/bar',
+                                  'absolute text-left transition-all duration-150 outline-none group/bar',
+                                  movable ? (isDragBar ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-pointer',
                                   'rounded-md shadow-sm',
                                   'focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1',
                                   block.isAiRecommended
@@ -432,6 +513,8 @@ export function GanttView({ selectedBlockId, onSelectBlock, planBlockIds, extraB
                                   isSelected && 'ring-2 ring-offset-1 ring-offset-background ring-[#1a237e] shadow-md z-10',
                                   isHovered && !isSelected && 'shadow-md z-10 brightness-110',
                                   hasConflict && showConflicts && 'ring-1 ring-red-400',
+                                  isDragBar && 'z-20 shadow-xl ring-2 ring-[#FF9933] brightness-110 saturate-150',
+                                  ganttDrag && !isDragBar && (overlappedWhileDrag ? 'opacity-100 saturate-100 ring-2 ring-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' : 'opacity-50 saturate-50'),
                                 )}
                                 style={{
                                   left: `${leftPct}%`,
@@ -439,13 +522,28 @@ export function GanttView({ selectedBlockId, onSelectBlock, planBlockIds, extraB
                                   top: laneIdx * ROW_HEIGHT + 6,
                                   height: ROW_HEIGHT - 12,
                                   transformOrigin: 'left center',
+                                  touchAction: movable ? 'none' : undefined,
                                 }}
-                                onClick={() => onSelectBlock(isSelected ? null : block.id)}
+                                onClick={() => {
+                                  if (ganttSuppressClickRef.current) {
+                                    ganttSuppressClickRef.current = false
+                                    return
+                                  }
+                                  onSelectBlock(isSelected ? null : block.id)
+                                }}
                                 onMouseEnter={() => setHoveredBlockId(block.id)}
                                 onMouseLeave={() => setHoveredBlockId(null)}
+                                onPointerDown={movable ? (e) => handleGanttPointerDown(e, block) : undefined}
+                                onPointerMove={movable ? handleGanttPointerMove : undefined}
+                                onPointerUp={movable ? () => endGanttDrag(true) : undefined}
+                                onPointerCancel={movable ? () => endGanttDrag(false) : undefined}
+                                aria-label={`${block.name}, ${block.department}${movable ? ', drag to reschedule' : ''}`}
                               >
-                                {/* Drag handle (visual only) on hover */}
-                                <div className="absolute left-0 top-0 bottom-0 w-1.5 rounded-l-md bg-black/10 opacity-0 group-hover/bar:opacity-100 transition-opacity flex items-center justify-center">
+                                {/* Drag handle — persistent on movable bars, hover-only otherwise */}
+                                <div className={cn(
+                                  'absolute left-0 top-0 bottom-0 w-1.5 rounded-l-md bg-black/10 flex items-center justify-center transition-opacity',
+                                  movable ? 'opacity-40 group-hover/bar:opacity-100' : 'opacity-0 group-hover/bar:opacity-100',
+                                )}>
                                   <GripVertical className="h-2.5 w-2.5 text-white/60" />
                                 </div>
 
@@ -670,10 +768,17 @@ export function GanttView({ selectedBlockId, onSelectBlock, planBlockIds, extraB
         </span>
 
         {/* Drag handle */}
-        <span className="flex items-center gap-1.5">
-          <GripVertical className="h-3.5 w-3.5 text-muted-foreground" />
-          <span className="text-[11px] text-muted-foreground font-medium">Drag</span>
-        </span>
+        {onMoveBlock ? (
+          <span className="flex items-center gap-1.5">
+            <GripVertical className="h-3.5 w-3.5 text-[#c2410c]" />
+            <span className="text-[11px] text-muted-foreground font-medium">Drag custom blocks</span>
+          </span>
+        ) : (
+          <span className="flex items-center gap-1.5">
+            <GripVertical className="h-3.5 w-3.5 text-muted-foreground" />
+            <span className="text-[11px] text-muted-foreground font-medium">Drag</span>
+          </span>
+        )}
       </div>
     </div>
   )

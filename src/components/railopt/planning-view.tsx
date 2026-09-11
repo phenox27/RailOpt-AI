@@ -292,8 +292,9 @@ export function PlanningView() {
   }
 
   // Drag-and-drop / keyboard reschedule of a manual block on the timeline.
-  // newStartH is snapped to 15 min and clamped to [0, 24h − duration] by the timeline.
-  const handleMoveBlock = useCallback((blockId: string, newStartH: number) => {
+  // newStartH is snapped to 15 min and clamped to [0, 24h − duration] by the timeline;
+  // conflictBlockNames lists same-day blocks the proposed slot overlaps (live warning).
+  const handleMoveBlock = useCallback((blockId: string, newStartH: number, conflictBlockNames: string[] = [], source: 'drag' | 'keyboard' = 'drag') => {
     const block = customBlocks.find((b) => b.id === blockId)
     if (!block) return
     const durationMin = Math.max(block.duration, 15)
@@ -308,18 +309,42 @@ export function PlanningView() {
     const endTime = `${selectedDate}T${pad(eh)}:${pad(em)}:00`
     if (startTime === block.startTime && endTime === block.endTime) return
 
-    const oldLabel = block.startTime.split('T')[1]?.slice(0, 5) ?? ''
-    const duration = endTotal - startTotal
-    setCustomBlocks((prev) =>
-      prev.map((b) => (b.id === blockId ? { ...b, startTime, endTime, duration } : b))
-    )
-    persistManualBlocks(
-      customBlocks.map((b) => (b.id === blockId ? { ...b, startTime, endTime, duration } : b)) as (SimBlock & { isManual: true })[]
-    )
-    void updateServerManualBlock(blockId, { startTime, endTime, duration })
-    toast.success('Block rescheduled', {
-      description: `${block.name}: ${oldLabel} → ${pad(sh)}:${pad(sm)} (saved to server)`,
-    })
+    const previous = { startTime: block.startTime, endTime: block.endTime, duration: block.duration }
+    const nextTimes = { startTime, endTime, duration: endTotal - startTotal }
+
+    // localStorage is written on every mutation, so it is always the freshest full list
+    const applyTimes = (times: { startTime: string; endTime: string; duration: number }) => {
+      setCustomBlocks((prev) => prev.map((b) => (b.id === blockId ? { ...b, ...times } : b)))
+      persistManualBlocks(loadManualBlocks().map((b) => (b.id === blockId ? { ...b, ...times } : b)) as (SimBlock & { isManual: true })[])
+      void updateServerManualBlock(blockId, times)
+    }
+    applyTimes(nextTimes)
+
+    const oldLabel = previous.startTime.split('T')[1]?.slice(0, 5) ?? ''
+    const newLabel = `${pad(sh)}:${pad(sm)}`
+    const undoAction = {
+      label: 'Undo',
+      onClick: () => {
+        applyTimes(previous)
+        toast.success('Reschedule reverted', {
+          description: `${block.name} restored to ${oldLabel}`,
+        })
+      },
+    }
+    if (conflictBlockNames.length > 0) {
+      toast.warning('Block moved — overlaps detected', {
+        description: `${block.name}: ${oldLabel} → ${newLabel} · overlaps ${conflictBlockNames.slice(0, 2).join(', ')}${conflictBlockNames.length > 2 ? ` +${conflictBlockNames.length - 2} more` : ''}`,
+        action: undoAction,
+        duration: 9000,
+      })
+    } else if (source !== 'keyboard') {
+      // Keyboard nudges stay silent on success — the block visibly moves; no toast spam
+      toast.success('Block rescheduled', {
+        description: `${block.name}: ${oldLabel} → ${newLabel} (saved to server)`,
+        action: undoAction,
+        duration: 8000,
+      })
+    }
   }, [customBlocks, selectedDate])
 
   // Effective plan block ids — applies the section/department filters + manual blocks
@@ -755,6 +780,7 @@ export function PlanningView() {
                 onSelectBlock={handleSelectBlock}
                 planBlockIds={effectivePlanBlockIds}
                 extraBlocks={customBlocks}
+                onMoveBlock={handleMoveBlock}
               />
             )}
           </div>

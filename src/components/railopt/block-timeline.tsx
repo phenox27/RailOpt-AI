@@ -51,12 +51,13 @@ interface BlockTimelineProps {
   onSelectBlock: (blockId: string | null) => void
   planBlockIds?: string[]
   extraBlocks?: SimBlock[]
-  /** When provided, manual (custom-*) blocks can be dragged horizontally to reschedule. */
-  onMoveBlock?: (blockId: string, newStartH: number) => void
+  /** When provided, manual (custom-*) blocks can be dragged horizontally to reschedule.
+   *  conflictBlockNames = same-day blocks the new slot overlaps; source distinguishes drag vs keyboard nudge. */
+  onMoveBlock?: (blockId: string, newStartH: number, conflictBlockNames: string[], source?: 'drag' | 'keyboard') => void
 }
 
 /** A manual block is draggable: DB-loaded blocks carry isManual, localStorage ones use the custom- id prefix. */
-function isMovable(block: SimBlock, canMove: boolean): boolean {
+export function isMovable(block: SimBlock, canMove: boolean): boolean {
   if (!canMove) return false
   return (block as { isManual?: boolean }).isManual === true || block.id.startsWith('custom-')
 }
@@ -114,6 +115,19 @@ function assignLanes(dayBlocks: SimBlock[]): TimelineLane[] {
   return lanes.map((blocks, idx) => ({ laneIndex: idx, blocks }))
 }
 
+/** Names of same-day blocks whose time window overlaps [startH, startH+durationH]. */
+export function computeOverlaps(dayBlocks: SimBlock[], draggedId: string, startH: number, durationH: number): string[] {
+  const endH = startH + durationH
+  return dayBlocks
+    .filter((b) => {
+      if (b.id === draggedId) return false
+      const bs = timeToHours(b.startTime)
+      const be = timeToHours(b.endTime)
+      return startH < be && endH > bs
+    })
+    .map((b) => b.name)
+}
+
 interface DragState {
   blockId: string
   origStartH: number
@@ -151,6 +165,12 @@ export function BlockTimeline({ selectedDate, selectedBlockId, onSelectBlock, pl
   }, [selectedDate, planBlockIds, extraBlocks])
 
   const lanes = useMemo(() => assignLanes(dayBlocks), [dayBlocks])
+
+  // Live conflict detection while dragging: same-day blocks the proposed slot overlaps
+  const dragConflicts = useMemo(() => {
+    if (!drag?.active) return [] as string[]
+    return computeOverlaps(dayBlocks, drag.blockId, drag.origStartH + drag.deltaH, drag.durationH)
+  }, [drag, dayBlocks])
 
   const clampStart = useCallback((startH: number, durationH: number) => {
     return Math.min(Math.max(0, startH), TOTAL_HOURS - durationH)
@@ -194,12 +214,14 @@ export function BlockTimeline({ selectedDate, selectedBlockId, onSelectBlock, pl
     const current = dragValueRef.current
     suppressClickRef.current = st?.moved === true
     if (commit && st && current && current.blockId === st.blockId && current.active && current.deltaH !== 0) {
-      onMoveBlock?.(st.blockId, current.origStartH + current.deltaH)
+      const newStart = current.origStartH + current.deltaH
+      const conflicts = computeOverlaps(dayBlocks, st.blockId, newStart, current.durationH)
+      onMoveBlock?.(st.blockId, newStart, conflicts)
     }
     dragValueRef.current = null
     dragRef.current = null
     setDrag(null)
-  }, [onMoveBlock])
+  }, [onMoveBlock, dayBlocks])
 
   const handleDragPointerUp = useCallback(() => endDrag(true), [endDrag])
   const handleDragPointerCancel = useCallback(() => endDrag(false), [endDrag])
@@ -212,8 +234,11 @@ export function BlockTimeline({ selectedDate, selectedBlockId, onSelectBlock, pl
     const durationH = Math.max(block.duration, 15) / 60
     const orig = timeToHours(block.startTime)
     const next = clampStart(orig + (e.key === 'ArrowRight' ? SNAP_H : -SNAP_H), durationH)
-    if (next !== orig) onMoveBlock(block.id, next)
-  }, [onMoveBlock, clampStart])
+    if (next !== orig) {
+      const conflicts = computeOverlaps(dayBlocks, block.id, next, durationH)
+      onMoveBlock(block.id, next, conflicts, 'keyboard')
+    }
+  }, [onMoveBlock, clampStart, dayBlocks])
 
   // Arrow key navigation for block items
   const handleTimelineKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -297,13 +322,16 @@ export function BlockTimeline({ selectedDate, selectedBlockId, onSelectBlock, pl
                 style={{ left: `${(i / TOTAL_HOURS) * 100}%` }}
               />
             ))}
-            {/* 15-min snap guides while dragging */}
+            {/* 15-min snap guides while dragging — red when the slot overlaps another block */}
             {drag?.active && (
               <div className="absolute inset-0 opacity-30" aria-hidden="true">
                 {Array.from({ length: TOTAL_HOURS * 4 + 1 }, (_, i) => (
                   <div
                     key={`snap-${i}`}
-                    className="absolute top-0 bottom-0 w-px bg-[#FF9933]/50"
+                    className={cn(
+                      'absolute top-0 bottom-0 w-px',
+                      dragConflicts.length > 0 ? 'bg-red-500/70' : 'bg-[#FF9933]/50',
+                    )}
                     style={{ left: `${((i * SNAP_H) / TOTAL_HOURS) * 100}%` }}
                   />
                 ))}
@@ -396,6 +424,8 @@ export function BlockTimeline({ selectedDate, selectedBlockId, onSelectBlock, pl
                           isDragging && 'z-20 shadow-xl ring-2 ring-[#FF9933] ring-offset-1 ring-offset-background brightness-110 saturate-150',
                           // Focus effect: dim everything else while a drag is in progress
                           drag?.active && !isDragging && 'opacity-50 saturate-50',
+                          // Blocks the dragged block would overlap flash a red ring
+                          drag?.active && !isDragging && dragConflicts.includes(block.name) && 'opacity-100 saturate-100 ring-2 ring-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]',
                         )}
                         style={{
                           left: `${leftPct}%`,
@@ -526,23 +556,41 @@ export function BlockTimeline({ selectedDate, selectedBlockId, onSelectBlock, pl
                 const ghostLeft = (timeToHours(dragged.startTime) / TOTAL_HOURS) * 100
                 const ghostWidth = ((Math.max(dragged.duration, 15) / 60) / TOTAL_HOURS) * 100
                 const newStart = drag.origStartH + drag.deltaH
+                const hasOverlap = dragConflicts.length > 0
                 return (
                   <>
                     <div
-                      className="absolute top-1 bottom-1 rounded-lg border-2 border-dashed border-muted-foreground/40 bg-muted-foreground/5 pointer-events-none"
+                      className={cn(
+                        'absolute top-1 bottom-1 rounded-lg border-2 border-dashed pointer-events-none',
+                        hasOverlap ? 'border-red-500/60 bg-red-500/5' : 'border-muted-foreground/40 bg-muted-foreground/5',
+                      )}
                       style={{ left: `${ghostLeft}%`, width: `${ghostWidth}%` }}
                       aria-hidden="true"
                     />
-                    {/* Live time chip pinned above the dragged block */}
+                    {/* Live time chip pinned above the dragged block — turns red on overlap */}
                     <div
                       className="absolute -top-1 z-30 pointer-events-none -translate-x-1/2"
                       style={{ left: `${((newStart + drag.durationH / 2) / TOTAL_HOURS) * 100}%` }}
                       role="status"
                     >
-                      <span className="whitespace-nowrap rounded-md bg-[#c2410c] px-2 py-0.5 text-[10px] font-semibold text-white shadow-lg border border-[#9a3412]">
-                        {formatHour(newStart)} → {formatHour(newStart + drag.durationH)}
+                      <span
+                        className={cn(
+                          'whitespace-nowrap rounded-md px-2 py-0.5 text-[10px] font-semibold text-white shadow-lg border max-w-[280px] truncate inline-block',
+                          hasOverlap
+                            ? 'bg-red-600 border-red-700 animate-pulse'
+                            : 'bg-[#c2410c] border-[#9a3412]',
+                        )}
+                      >
+                        {hasOverlap
+                          ? `⚠ Overlaps ${dragConflicts.slice(0, 2).join(', ')}${dragConflicts.length > 2 ? ` +${dragConflicts.length - 2}` : ''}`
+                          : `${formatHour(newStart)} → ${formatHour(newStart + drag.durationH)}`}
                       </span>
-                      <span className="absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-[#c2410c]" />
+                      <span
+                        className={cn(
+                          'absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent',
+                          hasOverlap ? 'border-t-red-600' : 'border-t-[#c2410c]',
+                        )}
+                      />
                     </div>
                   </>
                 )
