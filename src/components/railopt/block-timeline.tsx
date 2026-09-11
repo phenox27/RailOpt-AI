@@ -4,9 +4,11 @@ import { useMemo, useState, useRef, useCallback } from 'react'
 import { SimBlock, SimConflict, blocks, conflicts } from '@/data/simulated-data'
 import { Badge } from '@/components/ui/badge'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
-import { AlertTriangle, Bot, Clock, MapPin, GripVertical, MoveHorizontal } from 'lucide-react'
+import { AlertTriangle, Bot, Clock, MapPin, GripVertical, MoveHorizontal, TrainFront } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { motion } from 'framer-motion'
+import { computeTrainOverlaps } from '@/lib/train-conflicts'
+import type { DragPreviewInfo } from './corridor-utilization'
 
 // Department color mapping
 const DEPT_COLORS: Record<string, { bg: string; border: string; text: string }> = {
@@ -52,8 +54,11 @@ interface BlockTimelineProps {
   planBlockIds?: string[]
   extraBlocks?: SimBlock[]
   /** When provided, manual (custom-*) blocks can be dragged horizontally to reschedule.
-   *  conflictBlockNames = same-day blocks the new slot overlaps; source distinguishes drag vs keyboard nudge. */
-  onMoveBlock?: (blockId: string, newStartH: number, conflictBlockNames: string[], source?: 'drag' | 'keyboard') => void
+   *  conflictBlockNames = same-day blocks the new slot overlaps; source distinguishes drag vs keyboard nudge.
+   *  trainNumbers = corridor trains whose path crosses the proposed slot. */
+  onMoveBlock?: (blockId: string, newStartH: number, conflictBlockNames: string[], source?: 'drag' | 'keyboard', trainNumbers?: string[]) => void
+  /** Streams live drag preview state up to the Corridor Utilization panel. */
+  onDragPreview?: (preview: DragPreviewInfo | null) => void
 }
 
 /** A manual block is draggable: DB-loaded blocks carry isManual, localStorage ones use the custom- id prefix. */
@@ -136,7 +141,7 @@ interface DragState {
   active: boolean // passed the movement threshold
 }
 
-export function BlockTimeline({ selectedDate, selectedBlockId, onSelectBlock, planBlockIds, extraBlocks, onMoveBlock }: BlockTimelineProps) {
+export function BlockTimeline({ selectedDate, selectedBlockId, onSelectBlock, planBlockIds, extraBlocks, onMoveBlock, onDragPreview }: BlockTimelineProps) {
   const [hoveredBlockId, setHoveredBlockId] = useState<string | null>(null)
   const [drag, setDrag] = useState<DragState | null>(null)
   const timelineRef = useRef<HTMLDivElement>(null)
@@ -171,6 +176,29 @@ export function BlockTimeline({ selectedDate, selectedBlockId, onSelectBlock, pl
     if (!drag?.active) return [] as string[]
     return computeOverlaps(dayBlocks, drag.blockId, drag.origStartH + drag.deltaH, drag.durationH)
   }, [drag, dayBlocks])
+
+  // Live TRAIN-path conflicts while dragging: corridor trains crossing the proposed slot
+  const dragTrainConflicts = useMemo(() => {
+    if (!drag?.active) return [] as { number: string; name: string }[]
+    return computeTrainOverlaps(drag.origStartH + drag.deltaH, drag.durationH)
+  }, [drag])
+
+  // Push the live preview up to the Corridor Utilization panel (kept out of render)
+  const pushPreview = useCallback((next: DragState | null) => {
+    if (!onDragPreview) return
+    if (!next || !next.active) {
+      onDragPreview(null)
+      return
+    }
+    const startH = next.origStartH + next.deltaH
+    onDragPreview({
+      blockId: next.blockId,
+      startH,
+      durationH: next.durationH,
+      conflictCount: computeOverlaps(dayBlocks, next.blockId, startH, next.durationH).length,
+      trainNumbers: computeTrainOverlaps(startH, next.durationH).map((t) => t.number),
+    })
+  }, [onDragPreview, dayBlocks])
 
   const clampStart = useCallback((startH: number, durationH: number) => {
     return Math.min(Math.max(0, startH), TOTAL_HOURS - durationH)
@@ -207,7 +235,8 @@ export function BlockTimeline({ selectedDate, selectedBlockId, onSelectBlock, pl
     const next: DragState = { blockId: st.blockId, origStartH: st.origStartH, durationH: st.durationH, deltaH: nextDelta, active: true }
     dragValueRef.current = next
     setDrag(next)
-  }, [clampStart])
+    pushPreview(next)
+  }, [clampStart, pushPreview])
 
   const endDrag = useCallback((commit: boolean) => {
     const st = dragRef.current
@@ -216,12 +245,14 @@ export function BlockTimeline({ selectedDate, selectedBlockId, onSelectBlock, pl
     if (commit && st && current && current.blockId === st.blockId && current.active && current.deltaH !== 0) {
       const newStart = current.origStartH + current.deltaH
       const conflicts = computeOverlaps(dayBlocks, st.blockId, newStart, current.durationH)
-      onMoveBlock?.(st.blockId, newStart, conflicts)
+      const trainNumbers = computeTrainOverlaps(newStart, current.durationH).map((t) => t.number)
+      onMoveBlock?.(st.blockId, newStart, conflicts, 'drag', trainNumbers)
     }
     dragValueRef.current = null
     dragRef.current = null
     setDrag(null)
-  }, [onMoveBlock, dayBlocks])
+    pushPreview(null)
+  }, [onMoveBlock, dayBlocks, pushPreview])
 
   const handleDragPointerUp = useCallback(() => endDrag(true), [endDrag])
   const handleDragPointerCancel = useCallback(() => endDrag(false), [endDrag])
@@ -236,7 +267,8 @@ export function BlockTimeline({ selectedDate, selectedBlockId, onSelectBlock, pl
     const next = clampStart(orig + (e.key === 'ArrowRight' ? SNAP_H : -SNAP_H), durationH)
     if (next !== orig) {
       const conflicts = computeOverlaps(dayBlocks, block.id, next, durationH)
-      onMoveBlock(block.id, next, conflicts, 'keyboard')
+      const trainNumbers = computeTrainOverlaps(next, durationH).map((t) => t.number)
+      onMoveBlock(block.id, next, conflicts, 'keyboard', trainNumbers)
     }
   }, [onMoveBlock, clampStart, dayBlocks])
 
@@ -405,7 +437,7 @@ export function BlockTimeline({ selectedDate, selectedBlockId, onSelectBlock, pl
                 const origWidthPct = ((endH - startH) / TOTAL_HOURS) * 100
 
                 return (
-                  <HoverCard key={block.id} open={isDragging ? false : isHovered ? undefined : false}>
+                  <HoverCard key={block.id} open={isDragging ? false : isHovered}>
                     <HoverCardTrigger asChild>
                       <motion.button
                         data-block-id={block.id}
@@ -557,17 +589,18 @@ export function BlockTimeline({ selectedDate, selectedBlockId, onSelectBlock, pl
                 const ghostWidth = ((Math.max(dragged.duration, 15) / 60) / TOTAL_HOURS) * 100
                 const newStart = drag.origStartH + drag.deltaH
                 const hasOverlap = dragConflicts.length > 0
+                const hasTrainHit = dragTrainConflicts.length > 0
                 return (
                   <>
                     <div
                       className={cn(
                         'absolute top-1 bottom-1 rounded-lg border-2 border-dashed pointer-events-none',
-                        hasOverlap ? 'border-red-500/60 bg-red-500/5' : 'border-muted-foreground/40 bg-muted-foreground/5',
+                        hasOverlap ? 'border-red-500/60 bg-red-500/5' : hasTrainHit ? 'border-amber-500/60 bg-amber-500/5' : 'border-muted-foreground/40 bg-muted-foreground/5',
                       )}
                       style={{ left: `${ghostLeft}%`, width: `${ghostWidth}%` }}
                       aria-hidden="true"
                     />
-                    {/* Live time chip pinned above the dragged block — turns red on overlap */}
+                    {/* Live time chip pinned above the dragged block — red on block overlap, amber on train-path overlap */}
                     <div
                       className="absolute -top-1 z-30 pointer-events-none -translate-x-1/2"
                       style={{ left: `${((newStart + drag.durationH / 2) / TOTAL_HOURS) * 100}%` }}
@@ -578,17 +611,31 @@ export function BlockTimeline({ selectedDate, selectedBlockId, onSelectBlock, pl
                           'whitespace-nowrap rounded-md px-2 py-0.5 text-[10px] font-semibold text-white shadow-lg border max-w-[280px] truncate inline-block',
                           hasOverlap
                             ? 'bg-red-600 border-red-700 animate-pulse'
-                            : 'bg-[#c2410c] border-[#9a3412]',
+                            : hasTrainHit
+                              ? 'bg-amber-600 border-amber-700'
+                              : 'bg-[#c2410c] border-[#9a3412]',
                         )}
                       >
                         {hasOverlap
                           ? `⚠ Overlaps ${dragConflicts.slice(0, 2).join(', ')}${dragConflicts.length > 2 ? ` +${dragConflicts.length - 2}` : ''}`
                           : `${formatHour(newStart)} → ${formatHour(newStart + drag.durationH)}`}
                       </span>
+                      {/* Second row: train-path warnings (only when trains cross the proposed slot) */}
+                      {hasTrainHit && (
+                        <span className="flex items-center gap-1 mt-0.5 justify-center">
+                          <span className={cn(
+                            'whitespace-nowrap rounded px-1.5 py-px text-[9px] font-semibold text-white shadow border max-w-[280px] truncate inline-block',
+                            hasOverlap ? 'bg-amber-600/95 border-amber-700' : 'bg-amber-500 border-amber-600',
+                          )}>
+                            <TrainFront className="h-2.5 w-2.5 inline -mt-px mr-0.5" />
+                            {`Train ${dragTrainConflicts.slice(0, 2).map((t) => t.number).join(', ')}${dragTrainConflicts.length > 2 ? ` +${dragTrainConflicts.length - 2}` : ''} in path`}
+                          </span>
+                        </span>
+                      )}
                       <span
                         className={cn(
                           'absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent',
-                          hasOverlap ? 'border-t-red-600' : 'border-t-[#c2410c]',
+                          hasOverlap ? 'border-t-red-600' : hasTrainHit ? 'border-t-amber-600' : 'border-t-[#c2410c]',
                         )}
                       />
                     </div>

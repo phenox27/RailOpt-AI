@@ -20,6 +20,7 @@ import { TrackGeometryPanel } from './track-geometry-panel'
 import { GanttView } from './gantt-view'
 import { CrewSchedulingPanel } from './crew-scheduling-panel'
 import { BlockDurationOptimizer } from './block-duration-optimizer'
+import { CorridorUtilization, type DragPreviewInfo } from './corridor-utilization'
 import {
   Sparkles,
   Plus,
@@ -97,6 +98,8 @@ export function PlanningView() {
   const [localBlockDurations, setLocalBlockDurations] = useState<Record<string, number>>({})
   const [localBlockStatuses, setLocalBlockStatuses] = useState<Record<string, SimBlock['status']>>({})
   const [customBlocks, setCustomBlocks] = useState<SimBlock[]>([])
+  // Live drag preview streamed from the timeline/gantt → Corridor Utilization panel
+  const [dragPreview, setDragPreview] = useState<DragPreviewInfo | null>(null)
   const isMobile = useIsMobile()
 
   // Hydrate from server (source of truth) with one-time localStorage migration
@@ -293,8 +296,9 @@ export function PlanningView() {
 
   // Drag-and-drop / keyboard reschedule of a manual block on the timeline.
   // newStartH is snapped to 15 min and clamped to [0, 24h − duration] by the timeline;
-  // conflictBlockNames lists same-day blocks the proposed slot overlaps (live warning).
-  const handleMoveBlock = useCallback((blockId: string, newStartH: number, conflictBlockNames: string[] = [], source: 'drag' | 'keyboard' = 'drag') => {
+  // conflictBlockNames lists same-day blocks the proposed slot overlaps (live warning),
+  // trainNumbers lists corridor trains whose path crosses the proposed slot.
+  const handleMoveBlock = useCallback((blockId: string, newStartH: number, conflictBlockNames: string[] = [], source: 'drag' | 'keyboard' = 'drag', trainNumbers: string[] = []) => {
     const block = customBlocks.find((b) => b.id === blockId)
     if (!block) return
     const durationMin = Math.max(block.duration, 15)
@@ -331,9 +335,17 @@ export function PlanningView() {
         })
       },
     }
+    const trainSuffix = trainNumbers.length > 0 ? ` · train path: ${trainNumbers.slice(0, 3).join(', ')}${trainNumbers.length > 3 ? ` +${trainNumbers.length - 3}` : ''}` : ''
     if (conflictBlockNames.length > 0) {
       toast.warning('Block moved — overlaps detected', {
-        description: `${block.name}: ${oldLabel} → ${newLabel} · overlaps ${conflictBlockNames.slice(0, 2).join(', ')}${conflictBlockNames.length > 2 ? ` +${conflictBlockNames.length - 2} more` : ''}`,
+        description: `${block.name}: ${oldLabel} → ${newLabel} · overlaps ${conflictBlockNames.slice(0, 2).join(', ')}${conflictBlockNames.length > 2 ? ` +${conflictBlockNames.length - 2} more` : ''}${trainSuffix}`,
+        action: undoAction,
+        duration: 9000,
+      })
+    } else if (trainNumbers.length > 0) {
+      // No block overlap, but the slot crosses live train paths — amber advisory
+      toast.warning('Block moved — train path crossing', {
+        description: `${block.name}: ${oldLabel} → ${newLabel} · crosses train ${trainNumbers.slice(0, 2).join(', ')}${trainNumbers.length > 2 ? ` +${trainNumbers.length - 2}` : ''}`,
         action: undoAction,
         duration: 9000,
       })
@@ -362,6 +374,11 @@ export function PlanningView() {
   }, [activePlan, allBlocks, sectionFilter, deptFilter, customBlocks])
 
   const planBlocks = allBlocks.filter((b) => effectivePlanBlockIds.includes(b.id))
+
+  // Blocks on the selected day (same date-filtering as the timeline) → Corridor Utilization panel
+  const utilDayBlocks = useMemo(() => (
+    planBlocks.filter((b) => new Date(b.startTime).toISOString().split('T')[0] === selectedDate)
+  ), [planBlocks, selectedDate])
   const totalBlocks = planBlocks.length
   const aiRecommended = planBlocks.filter((b) => b.isAiRecommended).length
   const planConflicts = conflicts.filter((c) => !c.resolved)
@@ -772,6 +789,7 @@ export function PlanningView() {
                   planBlockIds={effectivePlanBlockIds}
                   extraBlocks={customBlocks}
                   onMoveBlock={handleMoveBlock}
+                  onDragPreview={setDragPreview}
                 />
               </div>
             ) : (
@@ -781,6 +799,7 @@ export function PlanningView() {
                 planBlockIds={effectivePlanBlockIds}
                 extraBlocks={customBlocks}
                 onMoveBlock={handleMoveBlock}
+                onDragPreview={setDragPreview}
               />
             )}
           </div>
@@ -793,20 +812,25 @@ export function PlanningView() {
               <SheetHeader>
                 <SheetTitle className="text-sm">Block Details</SheetTitle>
               </SheetHeader>
+              <CorridorUtilization dayBlocks={utilDayBlocks} preview={dragPreview} selectedBlock={selectedBlock} />
               {detailContent}
             </SheetContent>
           </Sheet>
         ) : (
           selectedBlock ? (
             <div className="w-full lg:w-[340px] xl:w-[380px] border-l border-border overflow-y-auto bg-background">
+              <CorridorUtilization dayBlocks={utilDayBlocks} preview={dragPreview} selectedBlock={selectedBlock} />
               {detailContent}
             </div>
           ) : (
-            <div className="hidden lg:flex w-[340px] xl:w-[380px] border-l border-border items-center justify-center bg-muted/10">
-              <div className="text-center text-muted-foreground">
-                <Info className="h-8 w-8 mx-auto mb-2 opacity-30" />
-                <p className="text-xs font-medium">Select a block to view details</p>
-                <p className="text-[10px] mt-1">Click on any block in the timeline</p>
+            <div className="hidden lg:flex w-[340px] xl:w-[380px] border-l border-border flex-col overflow-y-auto bg-muted/10">
+              <CorridorUtilization dayBlocks={utilDayBlocks} preview={dragPreview} className="bg-background" />
+              <div className="flex-1 flex items-center justify-center py-10">
+                <div className="text-center text-muted-foreground px-4">
+                  <Info className="h-8 w-8 mx-auto mb-2 opacity-30" />
+                  <p className="text-xs font-medium">Select a block to view details</p>
+                  <p className="text-[10px] mt-1">Click on any block in the timeline</p>
+                </div>
               </div>
             </div>
           )

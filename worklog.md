@@ -2232,3 +2232,45 @@ Stage Summary:
 - All buttons functional; team names untouched; demo manual block left at 17:00–20:00 Mon Jan 27 2025 for demoing
 - Unresolved/risks: (1) OOM discipline required (browser closed for lint); (2) overlap detection is same-day-blocks-only — train timetable conflicts are NOT recomputed live (the pre-existing conflicts data still drives the ⚠ badges); (3) Gantt drag at zoom>1 can move a bar out of the visible window (commit still correct; bar re-appears after release); (4) undo does not remove the extra BLOCK_RESCHEDULED audit entry created by the revert (by design — audit trail is append-only)
 - Next round suggestions: (1) audit view server-side action filter pushdown (fetch with ?action= instead of client-side filtering; needs merge strategy with simulated entries); (2) drag conflict detection vs train timetable events ( enrich chip with train numbers from conflicts data); (3) corridor utilization mini-chart on the Planning right rail that live-updates during drag (shows the freed/reused window); (4) print: per-plan PDF endpoint could accept ?summary=1 to reuse the Corridor Summary layout server-side for a download (current print is client-side only)
+
+---
+Task ID: cron-review-7
+Agent: main (Z.ai Code, webDevReview cron)
+Task: QA pass + corridor utilization live mini-chart + train-timetable conflict detection during drag (closes cron-review-6 suggestions #2, #3)
+
+Work Log:
+- QA baseline: swept all 8 admin views via agent-browser — 0 console errors/warnings; team accounts intact (Dhittika/Jeet/Diya/Debarshi/Rupam/Alivia on Quick Demo Access); demo manual block persisted through restart. Investigated a suspected "Settings nav doesn't navigate" bug → turned out to be stale agent-browser snapshot refs, NOT an app bug (JS click navigates fine, view survives focus/visibility session refetches — store's setUserFromSession reset is benign because LAST_VIEW_KEY always matches current view)
+- OOM hit twice this round (Chrome + turbopack recompile at 4GB). Discovery: `nohup bun run dev &` alone is NOT enough — the process group dies when the tool shell exits. RELIABLE recipe: `(setsid bun run dev > /dev/null 2>&1 &)`, close Chrome during heavy ops. Restarted + re-verified server this way
+
+- NEW FEATURE A — Corridor Utilization panel (new corridor-utilization.tsx, closes suggestion #3):
+  * 24-hour utilization chart (1h buckets) on the Planning right rail: bar height = summed block-minutes per hour, color scale emerald ≤40% → amber ≤70% → orange high → red "competing" (>60 min booked + dot marker + count in legend "Nh competing")
+  * LIVE drag preview: BlockTimeline/GanttView stream onDragPreview({blockId, startH, durationH, conflictCount, trainNumbers}) on every snapped pointer move (deduped by the existing dragValueRef change-guards, fired OUTSIDE setState updaters); panel removes the dragged block's original slot and overlays the proposed one — freed/reused capacity visible in real time; saffron/red bracket overlay, pulsing "Previewing HH:MM–HH:MM" badge (time integrated in badge after first screenshot showed the old floating chip colliding with the panel title)
+  * Live advisory banner while previewing with conflicts (red for block overlaps, amber for train-only)
+  * Train-path strip under the chart: all 7 corridor trains as spans (indigo), turning RED where the preview crosses them; per-span title tooltip "number · dep → arr (+1d) · name"
+  * Footer stats: Peak load % (color-coded), Block hours, longest Free window (HH:MM–HH:MM); now-marker line; hover tooltips per bar ("HH:00 · Xm · competing")
+  * Train cross-check for the SELECTED block (green "Clear of train paths" / amber "N trains cross this block: 12302 Rajdhani · …") — hidden while dragging
+  * Placement: top of the right rail in ALL three states (block selected / empty state / mobile Sheet above detail content)
+
+- NEW FEATURE B — Train-timetable conflict detection (new lib/train-conflicts.ts, closes suggestion #2):
+  * TRAIN_WINDOWS precomputed from simulated data with overnight wrap (arr ≤ dep → +24h); computeTrainOverlaps(startH, durationH) matches both same-day and previous-day-shifted windows (Duronto 20:40→06:15 correctly hits a 01:00–05:00 block)
+  * Timeline drag chip is now two-tier: main chip red+pulse on block overlap (unchanged), NEW second amber row "🚆 Train 12302, 12002 +1 in path" when the proposed slot crosses trains; train-only overlap (no block conflict) shows an amber chip + amber ghost; on commit: red toast for block overlaps (now with train suffix), NEW amber "Block moved — train path crossing" toast for train-only, success toast otherwise — all with Undo
+  * Keyboard nudges (Shift+←/→) compute trains too; Gantt drag commits pass trainNumbers as well
+  * E2E verified: drag to 01:00 zone → chip "⚠ Overlaps Block A1… + Train 12302, 12002 +1 in path"; toast "...crosses train 12302, 12002 +2"; Gantt drag 17:15→13:00 → "crosses train 12002, 22436" (both arrive ~14:00–14:15 ✓); block A1 selection → "5 trains cross this block" (incl. 2 overnight) ✓; 17:00–20:00 selection → "Clear of train paths" ✓
+
+- BUG FIX — HoverCard controlled/uncontrolled React warnings (pre-existing, surfaced during drags): timeline `open={isDragging ? false : isHovered ? undefined : false}` and Gantt `open={isDragBar ? false : undefined}` switched modes mid-interaction; now fully controlled (`open={isDragging ? false : isHovered}` / `open={isDragBar ? false : isHovered}`). Verified: drag + hover cycle produces ZERO console warnings
+
+- STYLING POLISH (mandatory): the utilization panel itself (heat-scale bars, train strips, stats grid, legends, advisories, now-marker, hover tooltips); Previewing badge with integrated mono time; train-span tooltips; dark-mode verified (mid-drag-dark.png) with strong contrast; mobile sheet layout verified (mobile-sheet-utilization.png)
+
+Verification Results (agent-browser + DB):
+- Timeline drag E2E: live Previewing badge + bracket + two-tier chip mid-drag ✓; commit toasts (red/amber/success) ✓; Undo round-trips ✓; PATCH /api/manual-blocks 200 ×14 ✓; BLOCK_RESCHEDULED audit entries with old → new windows for every drag+undo ✓
+- Gantt drag preview parity ✓ (badge + advisory live mid-drag)
+- Block A1 cross-check = 5 trains ✓; 17:00 block = clear ✓
+- All 8 views swept clean (0 errors, 0 warnings); bun run lint: 0 errors
+- Demo manual block left at 17:00–20:00 Mon Jan 27 2025 (clean round slot, clear of trains)
+- Artifacts: download/mid-drag-live-preview.png, download/mid-drag-dark.png, download/utilization-full.png, download/mobile-sheet-utilization.png
+
+Stage Summary:
+- Shipped the two top suggestions from cron-review-6: live corridor utilization mini-chart (drag-aware) + train-timetable conflict detection end-to-end (chip → toast → panel advisory → cross-check); fixed the last console warnings (HoverCard); documented the reliable setsid dev-server restart recipe
+- All buttons functional; team names untouched; no new dependencies
+- Unresolved/risks: (1) OOM discipline — setsid + Chrome closed for lint/recompile; (2) train-section mapping is corridor-wide by design (all 7 trains treated as corridor traffic — fine for the demo, would need per-section timetables in production); (3) utilization buckets count minutes summed across overlapping blocks (peak can exceed 100% — labeled "competing", intended); (4) dragPreview state resets on view switch (by design); (5) overnight train prev-day logic assumes blocks never wrap past 24h (guaranteed by clamp)
+- Next round suggestions: (1) audit view server-side action filter pushdown (?action= param, carried over from cron-review-6); (2) utilization panel click-to-jump: click an hour bucket to jump timeline selection to that hour's first block; (3) "next departures" ticker (trainsDepartingWithin helper already in lib, unused); (4) optimization results could write AI-recommended block slots back through the same reschedule pipeline for audit parity; (5) per-section utilization selector (panel currently aggregates all plan blocks on the day)

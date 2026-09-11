@@ -1,0 +1,651 @@
+     1→'use client'
+     2→
+     3→import { useMemo, useState, useRef, useCallback } from 'react'
+     4→import { SimBlock, SimConflict, blocks, conflicts } from '@/data/simulated-data'
+     5→import { Badge } from '@/components/ui/badge'
+     6→import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
+     7→import { AlertTriangle, Bot, Clock, MapPin, GripVertical, MoveHorizontal } from 'lucide-react'
+     8→import { cn } from '@/lib/utils'
+     9→import { motion } from 'framer-motion'
+    10→
+    11→// Department color mapping
+    12→const DEPT_COLORS: Record<string, { bg: string; border: string; text: string }> = {
+    13→  engineering: { bg: 'bg-blue-600', border: 'border-blue-700', text: 'text-blue-100' },
+    14→  snt: { bg: 'bg-[#1a237e]', border: 'border-[#283593]', text: 'text-[#e8eaf6]' },
+    15→  traction: { bg: 'bg-amber-600', border: 'border-amber-700', text: 'text-amber-50' },
+    16→  combined: { bg: 'bg-violet-500', border: 'border-violet-600', text: 'text-violet-50' },
+    17→}
+    18→
+    19→const DEPT_LIGHT_COLORS: Record<string, { bg: string; border: string; text: string }> = {
+    20→  engineering: { bg: 'bg-blue-100', border: 'border-blue-400', text: 'text-blue-800' },
+    21→  snt: { bg: 'bg-teal-100', border: 'border-[#3f51b5]', text: 'text-[#1a237e]' },
+    22→  traction: { bg: 'bg-amber-100', border: 'border-amber-400', text: 'text-amber-800' },
+    23→  combined: { bg: 'bg-violet-100', border: 'border-violet-400', text: 'text-violet-800' },
+    24→}
+    25→
+    26→const DEPT_LABELS: Record<string, string> = {
+    27→  engineering: 'ENGG',
+    28→  snt: 'S&T',
+    29→  traction: 'TRAC',
+    30→  combined: 'COMB',
+    31→}
+    32→
+    33→// Department legend colors (for the legend icons)
+    34→const DEPT_LEGEND_COLORS: Record<string, string> = {
+    35→  engineering: '#2563EB',
+    36→  snt: '#14B8A6',
+    37→  traction: '#D97706',
+    38→  combined: '#8B5CF6',
+    39→}
+    40→
+    41→const TOTAL_HOURS = 24
+    42→const LANE_HEIGHT = 52
+    43→const HEADER_HEIGHT = 28
+    44→const LANE_GAP = 6
+    45→const SNAP_H = 0.25 // 15-minute snap grid
+    46→const DRAG_THRESHOLD_PX = 4 // px before a press becomes a drag (click still selects)
+    47→
+    48→interface BlockTimelineProps {
+    49→  selectedDate: string
+    50→  selectedBlockId: string | null
+    51→  onSelectBlock: (blockId: string | null) => void
+    52→  planBlockIds?: string[]
+    53→  extraBlocks?: SimBlock[]
+    54→  /** When provided, manual (custom-*) blocks can be dragged horizontally to reschedule.
+    55→   *  conflictBlockNames = same-day blocks the new slot overlaps; source distinguishes drag vs keyboard nudge. */
+    56→  onMoveBlock?: (blockId: string, newStartH: number, conflictBlockNames: string[], source?: 'drag' | 'keyboard') => void
+    57→}
+    58→
+    59→/** A manual block is draggable: DB-loaded blocks carry isManual, localStorage ones use the custom- id prefix. */
+    60→export function isMovable(block: SimBlock, canMove: boolean): boolean {
+    61→  if (!canMove) return false
+    62→  return (block as { isManual?: boolean }).isManual === true || block.id.startsWith('custom-')
+    63→}
+    64→
+    65→// Parse ISO time to hours (e.g. "2025-01-27T01:00:00" -> 1.0)
+    66→function timeToHours(isoString: string): number {
+    67→  const d = new Date(isoString)
+    68→  return d.getHours() + d.getMinutes() / 60
+    69→}
+    70→
+    71→// Format hours to HH:MM
+    72→function formatHour(h: number): string {
+    73→  const hr = Math.floor(h)
+    74→  const min = Math.round((h - hr) * 60)
+    75→  return `${hr.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`
+    76→}
+    77→
+    78→// Check if a block belongs to the selected date
+    79→function isBlockOnDate(block: SimBlock, dateStr: string): boolean {
+    80→  const blockDate = new Date(block.startTime).toISOString().split('T')[0]
+    81→  return blockDate === dateStr
+    82→}
+    83→
+    84→interface TimelineLane {
+    85→  laneIndex: number
+    86→  blocks: SimBlock[]
+    87→}
+    88→
+    89→// Simple lane assignment: place blocks into lanes to avoid overlap
+    90→function assignLanes(dayBlocks: SimBlock[]): TimelineLane[] {
+    91→  const lanes: SimBlock[][] = []
+    92→
+    93→  for (const block of dayBlocks) {
+    94→    const startH = timeToHours(block.startTime)
+    95→    const endH = timeToHours(block.endTime)
+    96→
+    97→    let placed = false
+    98→    for (let i = 0; i < lanes.length; i++) {
+    99→      const hasOverlap = lanes[i].some((b) => {
+   100→        const bs = timeToHours(b.startTime)
+   101→        const be = timeToHours(b.endTime)
+   102→        return startH < be && endH > bs
+   103→      })
+   104→      if (!hasOverlap) {
+   105→        lanes[i].push(block)
+   106→        placed = true
+   107→        break
+   108→      }
+   109→    }
+   110→    if (!placed) {
+   111→      lanes.push([block])
+   112→    }
+   113→  }
+   114→
+   115→  return lanes.map((blocks, idx) => ({ laneIndex: idx, blocks }))
+   116→}
+   117→
+   118→/** Names of same-day blocks whose time window overlaps [startH, startH+durationH]. */
+   119→export function computeOverlaps(dayBlocks: SimBlock[], draggedId: string, startH: number, durationH: number): string[] {
+   120→  const endH = startH + durationH
+   121→  return dayBlocks
+   122→    .filter((b) => {
+   123→      if (b.id === draggedId) return false
+   124→      const bs = timeToHours(b.startTime)
+   125→      const be = timeToHours(b.endTime)
+   126→      return startH < be && endH > bs
+   127→    })
+   128→    .map((b) => b.name)
+   129→}
+   130→
+   131→interface DragState {
+   132→  blockId: string
+   133→  origStartH: number
+   134→  durationH: number
+   135→  deltaH: number // snapped shift, may be 0
+   136→  active: boolean // passed the movement threshold
+   137→}
+   138→
+   139→export function BlockTimeline({ selectedDate, selectedBlockId, onSelectBlock, planBlockIds, extraBlocks, onMoveBlock }: BlockTimelineProps) {
+   140→  const [hoveredBlockId, setHoveredBlockId] = useState<string | null>(null)
+   141→  const [drag, setDrag] = useState<DragState | null>(null)
+   142→  const timelineRef = useRef<HTMLDivElement>(null)
+   143→  const dragRef = useRef<{
+   144→    blockId: string
+   145→    origStartH: number
+   146→    durationH: number
+   147→    startX: number
+   148→    widthPx: number
+   149→    moved: boolean
+   150→  } | null>(null)
+   151→  // Mirrors the latest committed drag state so commit-time side effects
+   152→  // (calling onMoveBlock) never run inside a setState updater.
+   153→  const dragValueRef = useRef<DragState | null>(null)
+   154→  // Suppresses the synthetic click that follows a completed drag pointerup.
+   155→  const suppressClickRef = useRef(false)
+   156→
+   157→  // Filter blocks for the selected day and plan (including locally created blocks)
+   158→  const dayBlocks = useMemo(() => {
+   159→    const source = extraBlocks && extraBlocks.length > 0 ? [...blocks, ...extraBlocks] : blocks
+   160→    const filtered = source.filter((b) => {
+   161→      if (planBlockIds && !planBlockIds.includes(b.id)) return false
+   162→      return isBlockOnDate(b, selectedDate)
+   163→    })
+   164→    return filtered.sort((a, b) => timeToHours(a.startTime) - timeToHours(b.startTime))
+   165→  }, [selectedDate, planBlockIds, extraBlocks])
+   166→
+   167→  const lanes = useMemo(() => assignLanes(dayBlocks), [dayBlocks])
+   168→
+   169→  // Live conflict detection while dragging: same-day blocks the proposed slot overlaps
+   170→  const dragConflicts = useMemo(() => {
+   171→    if (!drag?.active) return [] as string[]
+   172→    return computeOverlaps(dayBlocks, drag.blockId, drag.origStartH + drag.deltaH, drag.durationH)
+   173→  }, [drag, dayBlocks])
+   174→
+   175→  const clampStart = useCallback((startH: number, durationH: number) => {
+   176→    return Math.min(Math.max(0, startH), TOTAL_HOURS - durationH)
+   177→  }, [])
+   178→
+   179→  // ---- Drag to reschedule (manual blocks only) ----
+   180→
+   181→  const handleDragPointerDown = useCallback((e: React.PointerEvent<HTMLButtonElement>, block: SimBlock) => {
+   182→    if (!onMoveBlock || e.button !== 0) return
+   183→    const laneEl = e.currentTarget.closest('[data-lane]') as HTMLElement | null
+   184→    const widthPx = (laneEl ?? e.currentTarget).getBoundingClientRect().width
+   185→    if (widthPx <= 0) return
+   186→    dragRef.current = {
+   187→      blockId: block.id,
+   188→      origStartH: timeToHours(block.startTime),
+   189→      durationH: Math.max(block.duration, 15) / 60,
+   190→      startX: e.clientX,
+   191→      widthPx,
+   192→      moved: false,
+   193→    }
+   194→  }, [onMoveBlock])
+   195→
+   196→  const handleDragPointerMove = useCallback((e: React.PointerEvent<HTMLButtonElement>) => {
+   197→    const st = dragRef.current
+   198→    if (!st) return
+   199→    const dx = e.clientX - st.startX
+   200→    if (!st.moved && Math.abs(dx) < DRAG_THRESHOLD_PX) return
+   201→    st.moved = true
+   202→    const rawDelta = (dx / st.widthPx) * TOTAL_HOURS
+   203→    const deltaH = Math.round(rawDelta / SNAP_H) * SNAP_H
+   204→    const nextDelta = clampStart(st.origStartH + deltaH, st.durationH) - st.origStartH
+   205→    const prev = dragValueRef.current
+   206→    if (prev && prev.blockId === st.blockId && prev.deltaH === nextDelta && prev.active) return
+   207→    const next: DragState = { blockId: st.blockId, origStartH: st.origStartH, durationH: st.durationH, deltaH: nextDelta, active: true }
+   208→    dragValueRef.current = next
+   209→    setDrag(next)
+   210→  }, [clampStart])
+   211→
+   212→  const endDrag = useCallback((commit: boolean) => {
+   213→    const st = dragRef.current
+   214→    const current = dragValueRef.current
+   215→    suppressClickRef.current = st?.moved === true
+   216→    if (commit && st && current && current.blockId === st.blockId && current.active && current.deltaH !== 0) {
+   217→      const newStart = current.origStartH + current.deltaH
+   218→      const conflicts = computeOverlaps(dayBlocks, st.blockId, newStart, current.durationH)
+   219→      onMoveBlock?.(st.blockId, newStart, conflicts)
+   220→    }
+   221→    dragValueRef.current = null
+   222→    dragRef.current = null
+   223→    setDrag(null)
+   224→  }, [onMoveBlock, dayBlocks])
+   225→
+   226→  const handleDragPointerUp = useCallback(() => endDrag(true), [endDrag])
+   227→  const handleDragPointerCancel = useCallback(() => endDrag(false), [endDrag])
+   228→
+   229→  // Keyboard nudge (Shift+←/→ moves a focused manual block by 15 min)
+   230→  const handleBlockKeyDown = useCallback((e: React.KeyboardEvent<HTMLButtonElement>, block: SimBlock) => {
+   231→    if (!onMoveBlock || !(e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight'))) return
+   232→    e.preventDefault()
+   233→    e.stopPropagation()
+   234→    const durationH = Math.max(block.duration, 15) / 60
+   235→    const orig = timeToHours(block.startTime)
+   236→    const next = clampStart(orig + (e.key === 'ArrowRight' ? SNAP_H : -SNAP_H), durationH)
+   237→    if (next !== orig) {
+   238→      const conflicts = computeOverlaps(dayBlocks, block.id, next, durationH)
+   239→      onMoveBlock(block.id, next, conflicts, 'keyboard')
+   240→    }
+   241→  }, [onMoveBlock, clampStart, dayBlocks])
+   242→
+   243→  // Arrow key navigation for block items
+   244→  const handleTimelineKeyDown = useCallback((e: React.KeyboardEvent) => {
+   245→    const blockButtons = timelineRef.current?.querySelectorAll<HTMLButtonElement>('[data-block-id]')
+   246→    if (!blockButtons || blockButtons.length === 0) return
+   247→
+   248→    const currentIndex = Array.from(blockButtons).findIndex(
+   249→      (btn) => btn === document.activeElement
+   250→    )
+   251→
+   252→    if (currentIndex === -1) return
+   253→
+   254→    let nextIndex = currentIndex
+   255→    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+   256→      e.preventDefault()
+   257→      nextIndex = (currentIndex + 1) % blockButtons.length
+   258→    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+   259→      e.preventDefault()
+   260→      nextIndex = (currentIndex - 1 + blockButtons.length) % blockButtons.length
+   261→    } else {
+   262→      return
+   263→    }
+   264→
+   265→    blockButtons[nextIndex]?.focus()
+   266→  }, [])
+   267→
+   268→  // Get conflicts for a block
+   269→  const getBlockConflicts = (blockId: string): SimConflict[] => {
+   270→    return conflicts.filter((c) => c.blockId === blockId && !c.resolved)
+   271→  }
+   272→
+   273→  // Current time indicator
+   274→  const currentHour = new Date().getHours() + new Date().getMinutes() / 60
+   275→  const nowPct = (currentHour / 24) * 100
+   276→
+   277→  if (dayBlocks.length === 0) {
+   278→    return (
+   279→      <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+   280→        <Clock className="h-10 w-10 mb-3 opacity-40" />
+   281→        <p className="text-sm font-medium">No blocks scheduled for this day</p>
+   282→        <p className="text-xs mt-1">Run AI optimization or manually add blocks</p>
+   283→      </div>
+   284→    )
+   285→  }
+   286→
+   287→  const timelineAriaLabel = `Block timeline for ${selectedDate}: ${dayBlocks.length} blocks across ${lanes.length} lanes`
+   288→
+   289→  return (
+   290→    <div className="w-full overflow-x-auto" role="img" aria-label={timelineAriaLabel} ref={timelineRef} onKeyDown={handleTimelineKeyDown}>
+   291→      <div className="min-w-[800px]">
+   292→        {/* Time axis header */}
+   293→        <div
+   294→          className="relative border-b border-border mb-0"
+   295→          style={{ height: HEADER_HEIGHT }}
+   296→        >
+   297→          {Array.from({ length: TOTAL_HOURS + 1 }, (_, i) => (
+   298→            <div
+   299→              key={`tick-${i}`}
+   300→              className="absolute top-0 flex flex-col items-center"
+   301→              style={{ left: `${(i / TOTAL_HOURS) * 100}%`, transform: 'translateX(-50%)' }}
+   302→            >
+   303→              <span className="text-[10px] text-muted-foreground font-mono mt-1">
+   304→                {i.toString().padStart(2, '0')}:00
+   305→              </span>
+   306→              <div className="w-px h-2 bg-border mt-0.5" />
+   307→            </div>
+   308→          ))}
+   309→        </div>
+   310→
+   311→        {/* Lanes */}
+   312→        <div className="relative">
+   313→          {/* Grid lines */}
+   314→          <div
+   315→            className="absolute inset-0 pointer-events-none"
+   316→            style={{ height: lanes.length * (LANE_HEIGHT + LANE_GAP) + LANE_GAP }}
+   317→          >
+   318→            {Array.from({ length: TOTAL_HOURS + 1 }, (_, i) => (
+   319→              <div
+   320→                key={`grid-${i}`}
+   321→                className="absolute top-0 bottom-0 w-px bg-border/40"
+   322→                style={{ left: `${(i / TOTAL_HOURS) * 100}%` }}
+   323→              />
+   324→            ))}
+   325→            {/* 15-min snap guides while dragging — red when the slot overlaps another block */}
+   326→            {drag?.active && (
+   327→              <div className="absolute inset-0 opacity-30" aria-hidden="true">
+   328→                {Array.from({ length: TOTAL_HOURS * 4 + 1 }, (_, i) => (
+   329→                  <div
+   330→                    key={`snap-${i}`}
+   331→                    className={cn(
+   332→                      'absolute top-0 bottom-0 w-px',
+   333→                      dragConflicts.length > 0 ? 'bg-red-500/70' : 'bg-[#FF9933]/50',
+   334→                    )}
+   335→                    style={{ left: `${((i * SNAP_H) / TOTAL_HOURS) * 100}%` }}
+   336→                  />
+   337→                ))}
+   338→              </div>
+   339→            )}
+   340→            {/* Current time indicator with pulse animation */}
+   341→            <motion.div
+   342→              className="absolute top-0 bottom-0 w-0.5 bg-red-500 z-10"
+   343→              style={{ left: `${nowPct}%` }}
+   344→              initial={{ opacity: 0 }}
+   345→              animate={{ opacity: 1 }}
+   346→              transition={{ duration: 0.5 }}
+   347→            >
+   348→              <motion.div
+   349→                className="absolute -top-1.5 -left-2 w-4 h-4 bg-red-500 rounded-full"
+   350→                animate={{
+   351→                  scale: [1, 1.3, 1],
+   352→                  opacity: [1, 0.6, 1],
+   353→                }}
+   354→                transition={{
+   355→                  duration: 2,
+   356→                  repeat: Infinity,
+   357→                  ease: 'easeInOut',
+   358→                }}
+   359→              />
+   360→              {/* Current time label */}
+   361→              <span className="absolute -top-5 -left-7 text-[9px] font-mono text-red-500 font-medium bg-background/80 px-1 rounded">
+   362→                {formatHour(currentHour)}
+   363→              </span>
+   364→            </motion.div>
+   365→          </div>
+   366→
+   367→          {lanes.map((lane) => (
+   368→            <div
+   369→              key={`lane-${lane.laneIndex}`}
+   370→              data-lane
+   371→              className="relative"
+   372→              style={{
+   373→                height: LANE_HEIGHT,
+   374→                marginBottom: LANE_GAP,
+   375→                marginTop: lane.laneIndex === 0 ? LANE_GAP : 0,
+   376→              }}
+   377→            >
+   378→              {/* Lane label */}
+   379→              <div className="absolute -left-0 top-0 bottom-0 flex items-center">
+   380→                <span className="text-[10px] text-muted-foreground/60 font-medium">
+   381→                  L{lane.laneIndex + 1}
+   382→                </span>
+   383→              </div>
+   384→
+   385→              {lane.blocks.map((block) => {
+   386→                const startH = timeToHours(block.startTime)
+   387→                const endH = timeToHours(block.endTime)
+   388→                const isSelected = selectedBlockId === block.id
+   389→                const isHovered = hoveredBlockId === block.id
+   390→                const blockConflicts = getBlockConflicts(block.id)
+   391→                const hasConflict = blockConflicts.length > 0
+   392→                const dept = block.department
+   393→                const colors = DEPT_COLORS[dept] || DEPT_COLORS.combined
+   394→                const lightColors = DEPT_LIGHT_COLORS[dept] || DEPT_LIGHT_COLORS.combined
+   395→                const deptLabel = DEPT_LABELS[dept] || dept.toUpperCase().slice(0, 4)
+   396→
+   397→                // ---- Drag state for this block ----
+   398→                const movable = isMovable(block, !!onMoveBlock)
+   399→                const isDragging = drag?.active === true && drag.blockId === block.id
+   400→                const shownStartH = isDragging ? drag.origStartH + drag.deltaH : startH
+   401→                const shownEndH = isDragging ? shownStartH + drag.durationH : endH
+   402→                const leftPct = (shownStartH / TOTAL_HOURS) * 100
+   403→                const widthPct = ((shownEndH - shownStartH) / TOTAL_HOURS) * 100
+   404→                const origLeftPct = (startH / TOTAL_HOURS) * 100
+   405→                const origWidthPct = ((endH - startH) / TOTAL_HOURS) * 100
+   406→
+   407→                return (
+   408→                  <HoverCard key={block.id} open={isDragging ? false : isHovered ? undefined : false}>
+   409→                    <HoverCardTrigger asChild>
+   410→                      <motion.button
+   411→                        data-block-id={block.id}
+   412→                        className={cn(
+   413→                          'absolute top-1 bottom-1 text-left transition-all duration-150 outline-none group/block',
+   414→                          movable ? (isDragging ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-pointer',
+   415→                          'focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1',
+   416→                          // Rounded corners and shadows
+   417→                          'rounded-lg shadow-sm',
+   418→                          // AI recommended: dashed border with teal tint, else solid
+   419→                          block.isAiRecommended
+   420→                            ? cn(lightColors.bg, 'border-2 border-dashed', lightColors.border)
+   421→                            : cn(colors.bg, 'border border-solid', colors.border),
+   422→                          isSelected && 'ring-2 ring-offset-1 ring-offset-background ring-[#1a237e] shadow-md',
+   423→                          isHovered && !isSelected && 'ring-1 ring-offset-1 ring-offset-background ring-[#3f51b5]/60 shadow-md',
+   424→                          isDragging && 'z-20 shadow-xl ring-2 ring-[#FF9933] ring-offset-1 ring-offset-background brightness-110 saturate-150',
+   425→                          // Focus effect: dim everything else while a drag is in progress
+   426→                          drag?.active && !isDragging && 'opacity-50 saturate-50',
+   427→                          // Blocks the dragged block would overlap flash a red ring
+   428→                          drag?.active && !isDragging && dragConflicts.includes(block.name) && 'opacity-100 saturate-100 ring-2 ring-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]',
+   429→                        )}
+   430→                        style={{
+   431→                          left: `${leftPct}%`,
+   432→                          width: `${widthPct}%`,
+   433→                          touchAction: movable ? 'none' : undefined,
+   434→                        }}
+   435→                        whileHover={isDragging ? undefined : {
+   436→                          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+   437→                          y: -1,
+   438→                        }}
+   439→                        animate={isDragging ? { scale: 1.02 } : { scale: 1 }}
+   440→                        transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+   441→                        onClick={() => {
+   442→                          // A completed drag must not also toggle selection
+   443→                          if (suppressClickRef.current) {
+   444→                            suppressClickRef.current = false
+   445→                            return
+   446→                          }
+   447→                          onSelectBlock(isSelected ? null : block.id)
+   448→                        }}
+   449→                        onMouseEnter={() => setHoveredBlockId(block.id)}
+   450→                        onMouseLeave={() => setHoveredBlockId(null)}
+   451→                        onPointerDown={movable ? (e) => handleDragPointerDown(e, block) : undefined}
+   452→                        onPointerMove={movable ? handleDragPointerMove : undefined}
+   453→                        onPointerUp={movable ? handleDragPointerUp : undefined}
+   454→                        onPointerCancel={movable ? handleDragPointerCancel : undefined}
+   455→                        onKeyDown={movable ? (e) => handleBlockKeyDown(e, block) : undefined}
+   456→                        aria-label={`${block.name}, ${block.department}, ${formatHour(shownStartH)} to ${formatHour(shownEndH)}${hasConflict ? ', has conflicts' : ''}${movable ? ', drag or press Shift with arrow keys to reschedule' : ''}`}
+   457→                        layout={false}
+   458→                      >
+   459→                        {/* Drag handle indicator — persistent on movable blocks, hover-only otherwise */}
+   460→                        <div className={cn(
+   461→                          'absolute left-0 top-0 bottom-0 w-4 flex items-center justify-center transition-opacity duration-150 pointer-events-none',
+   462→                          movable ? 'opacity-35 group-hover/block:opacity-90' : 'opacity-0 group-hover/block:opacity-60',
+   463→                        )}>
+   464→                          <GripVertical className={cn(
+   465→                            'h-3 w-3',
+   466→                            block.isAiRecommended ? lightColors.text : 'text-white/60',
+   467→                          )} />
+   468→                        </div>
+   469→
+   470→                        {/* Block content */}
+   471→                        <div className={cn('flex items-center gap-1 h-full overflow-hidden', movable ? 'pl-4 pr-2' : 'px-2')}>
+   472→                          {/* Department label */}
+   473→                          <span className={cn(
+   474→                            'text-[9px] font-bold uppercase shrink-0 px-1 py-0.5 rounded-sm',
+   475→                            block.isAiRecommended
+   476→                              ? 'bg-white/60 text-muted-foreground'
+   477→                              : 'bg-white/20 text-white/80',
+   478→                          )}>
+   479→                            {deptLabel}
+   480→                          </span>
+   481→                          {/* AI indicator */}
+   482→                          {block.isAiRecommended && (
+   483→                            <Bot className={cn('h-3 w-3 shrink-0', lightColors.text)} />
+   484→                          )}
+   485→                          {/* Conflict indicator */}
+   486→                          {hasConflict && (
+   487→                            <AlertTriangle className="h-3 w-3 shrink-0 text-red-500" />
+   488→                          )}
+   489→                          <span
+   490→                            className={cn(
+   491→                              'text-[11px] font-medium truncate leading-tight',
+   492→                              block.isAiRecommended ? lightColors.text : colors.text,
+   493→                            )}
+   494→                          >
+   495→                            {block.name}
+   496→                          </span>
+   497→                        </div>
+   498→                      </motion.button>
+   499→                    </HoverCardTrigger>
+   500→                    <HoverCardContent side="top" className="w-72 text-xs p-3" sideOffset={8}>
+   501→                      <div className="space-y-2">
+   502→                        <div className="flex items-center justify-between">
+   503→                          <p className="font-semibold text-sm">{block.name}</p>
+   504→                          {block.isAiRecommended && (
+   505→                            <Badge className="text-[9px] px-1.5 py-0 h-4 bg-[#e8eaf6] text-[#0d47a1] border-[#9fa8da]">
+   506→                              AI
+   507→                            </Badge>
+   508→                          )}
+   509→                        </div>
+   510→                        <div className="flex items-center gap-1.5 text-muted-foreground">
+   511→                          <Clock className="h-3 w-3" />
+   512→                          <span>{formatHour(shownStartH)} – {formatHour(shownEndH)} ({block.duration} min)</span>
+   513→                        </div>
+   514→                        <div className="flex items-center gap-1.5 text-muted-foreground">
+   515→                          <MapPin className="h-3 w-3" />
+   516→                          <span>{block.section} · {block.stationFrom} → {block.stationTo}</span>
+   517→                        </div>
+   518→                        <div className="flex items-center gap-1.5 text-muted-foreground capitalize">
+   519→                          <span>Line: {block.line} · Dept: {block.department}</span>
+   520→                        </div>
+   521→                        {block.isAiRecommended && (
+   522→                          <div className="pt-1 border-t border-border">
+   523→                            <p className="text-[#283593] font-medium text-[11px]">
+   524→                              AI Recommendation · Confidence: {Math.round(block.aiConfidence * 100)}%
+   525→                            </p>
+   526→                            <p className="text-muted-foreground text-[10px] mt-1 line-clamp-2">
+   527→                              {block.aiReasoning}
+   528→                            </p>
+   529→                          </div>
+   530→                        )}
+   531→                        {hasConflict && (
+   532→                          <div className="pt-1 border-t border-border">
+   533→                            <p className="text-red-600 font-medium text-[11px]">
+   534→                              ⚠ {blockConflicts.length} conflict{blockConflicts.length > 1 ? 's' : ''} detected
+   535→                            </p>
+   536→                            {blockConflicts.map(c => (
+   537→                              <p key={c.id} className="text-[10px] text-muted-foreground mt-0.5">{c.description}</p>
+   538→                            ))}
+   539→                          </div>
+   540→                        )}
+   541→                        {movable && (
+   542→                          <div className="pt-1 border-t border-border flex items-center gap-1.5 text-[10px] text-muted-foreground">
+   543→                            <MoveHorizontal className="h-3 w-3 text-[#c2410c]" />
+   544→                            <span>Drag to reschedule · Shift + ←/→ nudges 15 min</span>
+   545→                          </div>
+   546→                        )}
+   547→                      </div>
+   548→                    </HoverCardContent>
+   549→                  </HoverCard>
+   550→                )
+   551→              })}
+   552→
+   553→              {/* Ghost outline at the original slot + live time chip for the block being dragged (rendered inside its lane) */}
+   554→              {drag?.active && lane.blocks.some((b) => b.id === drag.blockId) && (() => {
+   555→                const dragged = lane.blocks.find((b) => b.id === drag.blockId)!
+   556→                const ghostLeft = (timeToHours(dragged.startTime) / TOTAL_HOURS) * 100
+   557→                const ghostWidth = ((Math.max(dragged.duration, 15) / 60) / TOTAL_HOURS) * 100
+   558→                const newStart = drag.origStartH + drag.deltaH
+   559→                const hasOverlap = dragConflicts.length > 0
+   560→                return (
+   561→                  <>
+   562→                    <div
+   563→                      className={cn(
+   564→                        'absolute top-1 bottom-1 rounded-lg border-2 border-dashed pointer-events-none',
+   565→                        hasOverlap ? 'border-red-500/60 bg-red-500/5' : 'border-muted-foreground/40 bg-muted-foreground/5',
+   566→                      )}
+   567→                      style={{ left: `${ghostLeft}%`, width: `${ghostWidth}%` }}
+   568→                      aria-hidden="true"
+   569→                    />
+   570→                    {/* Live time chip pinned above the dragged block — turns red on overlap */}
+   571→                    <div
+   572→                      className="absolute -top-1 z-30 pointer-events-none -translate-x-1/2"
+   573→                      style={{ left: `${((newStart + drag.durationH / 2) / TOTAL_HOURS) * 100}%` }}
+   574→                      role="status"
+   575→                    >
+   576→                      <span
+   577→                        className={cn(
+   578→                          'whitespace-nowrap rounded-md px-2 py-0.5 text-[10px] font-semibold text-white shadow-lg border max-w-[280px] truncate inline-block',
+   579→                          hasOverlap
+   580→                            ? 'bg-red-600 border-red-700 animate-pulse'
+   581→                            : 'bg-[#c2410c] border-[#9a3412]',
+   582→                        )}
+   583→                      >
+   584→                        {hasOverlap
+   585→                          ? `⚠ Overlaps ${dragConflicts.slice(0, 2).join(', ')}${dragConflicts.length > 2 ? ` +${dragConflicts.length - 2}` : ''}`
+   586→                          : `${formatHour(newStart)} → ${formatHour(newStart + drag.durationH)}`}
+   587→                      </span>
+   588→                      <span
+   589→                        className={cn(
+   590→                          'absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent',
+   591→                          hasOverlap ? 'border-t-red-600' : 'border-t-[#c2410c]',
+   592→                        )}
+   593→                      />
+   594→                    </div>
+   595→                  </>
+   596→                )
+   597→              })()}
+   598→            </div>
+   599→          ))}
+   600→        </div>
+   601→
+   602→        {/* Legend - improved with better spacing and icons */}
+   603→        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 pt-3 pb-1 border-t border-border mt-2">
+   604→          <span className="text-xs text-muted-foreground font-semibold tracking-wide uppercase">Dept</span>
+   605→          {Object.entries({
+   606→            engineering: 'Engineering',
+   607→            snt: 'S&T',
+   608→            traction: 'Traction',
+   609→            combined: 'Combined',
+   610→          }).map(([code, label]) => {
+   611→            const legendColor = DEPT_LEGEND_COLORS[code]
+   612→            return (
+   613→              <span key={code} className="flex items-center gap-1.5">
+   614→                <span
+   615→                  className="h-3 w-3 rounded-sm shadow-sm"
+   616→                  style={{ backgroundColor: legendColor }}
+   617→                />
+   618→                <span className="text-xs text-muted-foreground font-medium">{label}</span>
+   619→              </span>
+   620→            )
+   621→          })}
+   622→          <span className="text-border mx-1">|</span>
+   623→          <span className="flex items-center gap-1.5">
+   624→            <Bot className="h-3.5 w-3.5 text-[#283593]" />
+   625→            <span className="text-xs text-muted-foreground font-medium">AI Recommended</span>
+   626→            <span className="h-3 w-3 rounded-sm border-2 border-dashed border-[#3f51b5] bg-[#e8eaf6]" />
+   627→          </span>
+   628→          <span className="flex items-center gap-1.5">
+   629→            <AlertTriangle className="h-3.5 w-3.5 text-red-500" />
+   630→            <span className="text-xs text-muted-foreground font-medium">Conflict</span>
+   631→          </span>
+   632→          <span className="flex items-center gap-1.5">
+   633→            <motion.span
+   634→              className="h-3 w-0.5 bg-red-500 rounded-full"
+   635→              animate={{ opacity: [1, 0.4, 1] }}
+   636→              transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+   637→            />
+   638→            <span className="text-xs text-muted-foreground font-medium">Now</span>
+   639→          </span>
+   640→          {onMoveBlock && (
+   641→            <span className="flex items-center gap-1.5">
+   642→              <MoveHorizontal className="h-3.5 w-3.5 text-[#c2410c]" />
+   643→              <span className="text-xs text-muted-foreground font-medium">Drag custom blocks</span>
+   644→            </span>
+   645→          )}
+   646→        </div>
+   647→      </div>
+   648→    </div>
+   649→  )
+   650→}
+   651→

@@ -4,6 +4,8 @@ import { useState, useMemo, useCallback, useRef } from 'react'
 import { blocks, conflicts, corridors } from '@/data/simulated-data'
 import type { SimBlock, SimConflict } from '@/data/simulated-data'
 import { computeOverlaps, isMovable } from './block-timeline'
+import { computeTrainOverlaps } from '@/lib/train-conflicts'
+import type { DragPreviewInfo } from './corridor-utilization'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
@@ -87,8 +89,11 @@ interface GanttViewProps {
   onSelectBlock: (blockId: string | null) => void
   planBlockIds?: string[]
   extraBlocks?: SimBlock[]
-  /** When provided, manual (custom-*) blocks can be dragged horizontally to reschedule. */
-  onMoveBlock?: (blockId: string, newStartH: number, conflictBlockNames: string[], source?: 'drag' | 'keyboard') => void
+  /** When provided, manual (custom-*) blocks can be dragged horizontally to reschedule.
+   *  trainNumbers = corridor trains whose path crosses the proposed slot. */
+  onMoveBlock?: (blockId: string, newStartH: number, conflictBlockNames: string[], source?: 'drag' | 'keyboard', trainNumbers?: string[]) => void
+  /** Streams live drag preview state up to the Corridor Utilization panel. */
+  onDragPreview?: (preview: DragPreviewInfo | null) => void
 }
 
 function timeToHours(isoString: string): number {
@@ -126,7 +131,7 @@ function assignLanes(blocksToAssign: SimBlock[]): SimBlock[][] {
   return lanes
 }
 
-export function GanttView({ selectedBlockId, onSelectBlock, planBlockIds, extraBlocks, onMoveBlock }: GanttViewProps) {
+export function GanttView({ selectedBlockId, onSelectBlock, planBlockIds, extraBlocks, onMoveBlock, onDragPreview }: GanttViewProps) {
   // Filters
   const [deptFilter, setDeptFilter] = useState<string>('all')
   const [showAiRecommended, setShowAiRecommended] = useState(true)
@@ -201,7 +206,18 @@ export function GanttView({ selectedBlockId, onSelectBlock, planBlockIds, extraB
     const next = { blockId: st.blockId, deltaH: nextDelta }
     ganttDragValueRef.current = next
     setGanttDrag(next)
-  }, [hoursVisible, ganttClampStart])
+    // Stream live preview up to the Corridor Utilization panel
+    if (onDragPreview) {
+      const startH = ganttClampStart(st.origStartH + nextDelta, st.durationH)
+      onDragPreview({
+        blockId: st.blockId,
+        startH,
+        durationH: st.durationH,
+        conflictCount: computeOverlaps(filteredBlocks, st.blockId, startH, st.durationH).length,
+        trainNumbers: computeTrainOverlaps(startH, st.durationH).map((t) => t.number),
+      })
+    }
+  }, [hoursVisible, ganttClampStart, onDragPreview, filteredBlocks])
 
   const endGanttDrag = useCallback((commit: boolean) => {
     const st = ganttDragRef.current
@@ -210,12 +226,14 @@ export function GanttView({ selectedBlockId, onSelectBlock, planBlockIds, extraB
     if (commit && st && current && current.blockId === st.blockId && current.deltaH !== 0) {
       const newStart = ganttClampStart(st.origStartH + current.deltaH, st.durationH)
       const conflicts = computeOverlaps(filteredBlocks, st.blockId, newStart, st.durationH)
-      onMoveBlock?.(st.blockId, newStart, conflicts, 'drag')
+      const trainNumbers = computeTrainOverlaps(newStart, st.durationH).map((t) => t.number)
+      onMoveBlock?.(st.blockId, newStart, conflicts, 'drag', trainNumbers)
     }
     ganttDragValueRef.current = null
     ganttDragRef.current = null
     setGanttDrag(null)
-  }, [onMoveBlock, ganttClampStart, filteredBlocks])
+    onDragPreview?.(null)
+  }, [onMoveBlock, ganttClampStart, filteredBlocks, onDragPreview])
 
   // Live conflict names while a Gantt bar is being dragged
   const ganttDragConflicts = useMemo(() => {
@@ -496,7 +514,7 @@ export function GanttView({ selectedBlockId, onSelectBlock, planBlockIds, extraB
                         const lightColors = DEPT_LIGHT_COLORS[dept] || DEPT_LIGHT_COLORS.combined
 
                         return (
-                          <HoverCard key={block.id} open={isDragBar ? false : undefined}>
+                          <HoverCard key={block.id} open={isDragBar ? false : isHovered}>
                             <HoverCardTrigger asChild>
                               <motion.button
                                 initial={{ opacity: 0, scaleX: 0.8 }}

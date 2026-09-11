@@ -1,0 +1,825 @@
+     1→'use client'
+     2→
+     3→import { useState, useCallback, useMemo, useEffect } from 'react'
+     4→import { plans, blocks, conflicts, maintenanceRequests, corridors, type SimBlock, type SimPlan } from '@/data/simulated-data'
+     5→import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select'
+     6→import { loadCustomPlans, addBlockToCustomPlan, loadManualBlocks, persistManualBlocks, migrateLocalCustomPlans, migrateLocalManualBlocks, createServerManualBlock, linkServerCustomPlanBlock, updateServerManualBlock, type CustomPlan } from '@/lib/custom-plans'
+     7→import { useAppStore } from '@/store/app-store'
+     8→import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+     9→import { Badge } from '@/components/ui/badge'
+    10→import { Button } from '@/components/ui/button'
+    11→import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+    12→import { Separator } from '@/components/ui/separator'
+    13→import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+    14→import { BlockTimeline } from './block-timeline'
+    15→import { AiRecommendationPanel } from './ai-recommendation-panel'
+    16→import { BlockDetailPanel } from './block-detail-panel'
+    17→import { OptimizationProgress } from './optimization-progress'
+    18→import { ManualBlockForm } from './manual-block-form'
+    19→import { TrackGeometryPanel } from './track-geometry-panel'
+    20→import { GanttView } from './gantt-view'
+    21→import { CrewSchedulingPanel } from './crew-scheduling-panel'
+    22→import { BlockDurationOptimizer } from './block-duration-optimizer'
+    23→import {
+    24→  Sparkles,
+    25→  Plus,
+    26→  CalendarClock,
+    27→  AlertTriangle,
+    28→  Blocks,
+    29→  CheckCircle2,
+    30→  ChevronLeft,
+    31→  ChevronRight,
+    32→  Filter,
+    33→  Bot,
+    34→  Info,
+    35→  Clock,
+    36→  Users,
+    37→  Zap,
+    38→  X,
+    39→  Printer,
+    40→  Gauge,
+    41→  ChevronDown,
+    42→  ChevronUp,
+    43→  GanttChart,
+    44→  List,
+    45→  HardHat,
+    46→  Brain,
+    47→} from 'lucide-react'
+    48→import { cn } from '@/lib/utils'
+    49→import { format, parseISO, addDays, subDays, isToday } from 'date-fns'
+    50→import { motion } from 'framer-motion'
+    51→import { useIsMobile } from '@/hooks/use-mobile'
+    52→import { useDeepLink } from '@/hooks/use-deep-link'
+    53→import { PrintHeader } from './print-header'
+    54→import { toast } from 'sonner'
+    55→
+    56→// Plan status badge
+    57→const PLAN_STATUS_CONFIG: Record<string, { label: string; className: string }> = {
+    58→  draft: { label: 'Draft', className: 'bg-muted text-foreground/80 border-border' },
+    59→  optimizing: { label: 'Optimizing', className: 'bg-[#e8eaf6] text-[#0d47a1] border-[#9fa8da]' },
+    60→  recommended: { label: 'Recommended', className: 'bg-[#e8eaf6] text-[#0d47a1] border-[#9fa8da]' },
+    61→  reviewed: { label: 'Reviewed', className: 'bg-blue-50 text-blue-700 border-blue-200' },
+    62→  verified: { label: 'Verified', className: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+    63→  finalized: { label: 'Finalized', className: 'bg-violet-50 text-violet-700 border-violet-200' },
+    64→  approved: { label: 'Approved', className: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+    65→}
+    66→
+    67→export function PlanningView() {
+    68→  const [planTab, setPlanTab] = useState<'weekly' | 'monthly'>('weekly')
+    69→  // Custom plans (from Plans view wizard) + which plan is being viewed
+    70→  const [customPlans, setCustomPlans] = useState<CustomPlan[]>([])
+    71→  const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null)
+    72→  const storeActivePlanId = useAppStore((s) => s.activePlanId)
+    73→  const setActivePlanId = useAppStore((s) => s.setActivePlanId)
+    74→
+    75→  const basePlan = plans.find((p) => p.type === planTab) || plans[0]
+    76→  const activePlan: SimPlan = useMemo(() => {
+    77→    if (selectedPlanId) {
+    78→      const custom = customPlans.find((p) => p.id === selectedPlanId)
+    79→      if (custom) return custom
+    80→    }
+    81→    return basePlan
+    82→  }, [selectedPlanId, customPlans, basePlan])
+    83→  const isCustomPlanActive = (activePlan as CustomPlan).isCustom === true
+    84→
+    85→  const planStart = parseISO(activePlan.startDate)
+    86→  const [selectedDate, setSelectedDate] = useState(basePlan.startDate)
+    87→  const [sectionFilter, setSectionFilter] = useState<string>('all')
+    88→  const [deptFilter, setDeptFilter] = useState<string>('all')
+    89→  const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null)
+    90→  const [isOptimizing, setIsOptimizing] = useState(false)
+    91→  const [optimizationDone, setOptimizationDone] = useState(false)
+    92→  const [manualFormOpen, setManualFormOpen] = useState(false)
+    93→  const [detailSheetOpen, setDetailSheetOpen] = useState(false)
+    94→  const [trackDataVisible, setTrackDataVisible] = useState(false)
+    95→  const [timelineMode, setTimelineMode] = useState<'timeline' | 'gantt' | 'crew'>('timeline')
+    96→  const [optimizerVisible, setOptimizerVisible] = useState(false)
+    97→  const [localBlockDurations, setLocalBlockDurations] = useState<Record<string, number>>({})
+    98→  const [localBlockStatuses, setLocalBlockStatuses] = useState<Record<string, SimBlock['status']>>({})
+    99→  const [customBlocks, setCustomBlocks] = useState<SimBlock[]>([])
+   100→  const isMobile = useIsMobile()
+   101→
+   102→  // Hydrate from server (source of truth) with one-time localStorage migration
+   103→  useEffect(() => {
+   104→    let cancelled = false
+   105→    const t = setTimeout(async () => {
+   106→      try {
+   107→        const [mergedBlocks, mergedPlans] = await Promise.all([
+   108→          migrateLocalManualBlocks(loadManualBlocks()),
+   109→          migrateLocalCustomPlans(loadCustomPlans()),
+   110→        ])
+   111→        if (cancelled) return
+   112→        if (mergedBlocks.length > 0) {
+   113→          setCustomBlocks(mergedBlocks)
+   114→          persistManualBlocks(mergedBlocks)
+   115→        }
+   116→        if (mergedPlans.length > 0) setCustomPlans(mergedPlans)
+   117→      } catch {
+   118→        // server unavailable — localStorage values (loaded above) remain
+   119→      }
+   120→    }, 0)
+   121→    return () => {
+   122→      cancelled = true
+   123→      clearTimeout(t)
+   124→    }
+   125→  }, [])
+   126→
+   127→  // Consume "Open in Planning" requests from the Plans view
+   128→  useEffect(() => {
+   129→    if (!storeActivePlanId) return
+   130→    const t = setTimeout(() => {
+   131→      const target = loadCustomPlans().find((p) => p.id === storeActivePlanId)
+   132→      if (target) {
+   133→        setCustomPlans((prev) => (prev.some((p) => p.id === target.id) ? prev : [...prev, target]))
+   134→        setSelectedPlanId(target.id)
+   135→        toast.info(`Viewing "${target.name}"`, {
+   136→          description: 'Blocks you add are linked to this custom plan',
+   137→        })
+   138→      }
+   139→      setActivePlanId(null)
+   140→    }, 0)
+   141→    return () => clearTimeout(t)
+   142→  }, [storeActivePlanId, setActivePlanId])
+   143→
+   144→  // Clamp the selected day into the active plan window when switching plans
+   145→  useEffect(() => {
+   146→    const t = setTimeout(() => {
+   147→      setSelectedDate((cur) =>
+   148→        cur < activePlan.startDate || cur > activePlan.endDate ? activePlan.startDate : cur
+   149→      )
+   150→    }, 0)
+   151→    return () => clearTimeout(t)
+   152→  }, [activePlan.startDate, activePlan.endDate])
+   153→
+   154→  // Merge simulated blocks with locally created blocks + apply local overrides
+   155→  const allBlocks = useMemo(() => (
+   156→    [...blocks, ...customBlocks].map((b) => ({
+   157→      ...b,
+   158→      duration: localBlockDurations[b.id] ?? b.duration,
+   159→      status: localBlockStatuses[b.id] ?? b.status,
+   160→    }))
+   161→  ), [customBlocks, localBlockDurations, localBlockStatuses])
+   162→
+   163→  const rawSelectedBlock = allBlocks.find((b) => b.id === selectedBlockId) || null
+   164→  const selectedBlock = rawSelectedBlock
+   165→
+   166→  // Deep link from command palette (select block)
+   167→  useDeepLink((type, id) => {
+   168→    if (type === 'block' && id) {
+   169→      const block = allBlocks.find((b) => b.id === id)
+   170→      if (block) {
+   171→        setSelectedBlockId(block.id)
+   172→        if (isMobile) setDetailSheetOpen(true)
+   173→      }
+   174→    }
+   175→  })
+   176→  const currentDate = parseISO(selectedDate)
+   177→  const goPrevDay = () => {
+   178→    const prev = subDays(currentDate, 1)
+   179→    if (prev >= planStart) setSelectedDate(format(prev, 'yyyy-MM-dd'))
+   180→  }
+   181→  const goNextDay = () => {
+   182→    const next = addDays(currentDate, 1)
+   183→    const planEnd = parseISO(activePlan.endDate)
+   184→    if (next <= planEnd) setSelectedDate(format(next, 'yyyy-MM-dd'))
+   185→  }
+   186→
+   187→  const runOptimization = async () => {
+   188→    setIsOptimizing(true)
+   189→    setOptimizationDone(false)
+   190→    try {
+   191→      const res = await fetch('/api/optimization', {
+   192→        method: 'POST',
+   193→        headers: { 'Content-Type': 'application/json' },
+   194→        body: JSON.stringify({ planId: activePlan.id, blockIds: activePlan.blockIds }),
+   195→      })
+   196→      if (!res.ok) throw new Error('Optimization failed')
+   197→    } catch {
+   198→      // Error handled in optimization progress
+   199→    }
+   200→  }
+   201→
+   202→  const onOptimizationComplete = useCallback(() => {
+   203→    setIsOptimizing(false)
+   204→    setOptimizationDone(true)
+   205→  }, [])
+   206→
+   207→  const handleSelectBlock = (id: string | null) => {
+   208→    setSelectedBlockId(id)
+   209→    if (id && isMobile) {
+   210→      setDetailSheetOpen(true)
+   211→    }
+   212→    if (!id) {
+   213→      setOptimizerVisible(false)
+   214→    }
+   215→  }
+   216→
+   217→  const handleApplyDuration = (newDuration: number) => {
+   218→    if (selectedBlockId) {
+   219→      setLocalBlockDurations(prev => ({ ...prev, [selectedBlockId]: newDuration }))
+   220→      setOptimizerVisible(false)
+   221→      toast.success('Block duration updated')
+   222→    }
+   223→  }
+   224→
+   225→  const handleBlockStatusChange = (blockId: string, nextStatus: SimBlock['status']) => {
+   226→    setLocalBlockStatuses(prev => ({ ...prev, [blockId]: nextStatus }))
+   227→    const LABELS: Record<string, string> = {
+   228→      edited: 'Block edited — submitted for verification',
+   229→      verified: 'Block verified',
+   230→      finalized: 'Block finalized — ready for approval',
+   231→      approved: 'Block approved',
+   232→      rejected: 'Block rejected',
+   233→    }
+   234→    if (nextStatus === 'rejected') {
+   235→      toast.error('Block rejected and removed from the recommended workflow')
+   236→    } else {
+   237→      toast.success(LABELS[nextStatus] || `Block status updated to ${nextStatus}`)
+   238→    }
+   239→  }
+   240→
+   241→  const handleCreateManualBlock = (data: {
+   242→    name: string
+   243→    section: string
+   244→    stationFrom: string
+   245→    stationTo: string
+   246→    startTime: string
+   247→    endTime: string
+   248→    department: string
+   249→    line: string
+   250→  }) => {
+   251→    // startTime/endTime are "HH:mm" — combine with the selected planning date
+   252→    const [sh, sm] = data.startTime.split(':').map(Number)
+   253→    const [eh, em] = data.endTime.split(':').map(Number)
+   254→    let durationMin = (eh * 60 + em) - (sh * 60 + sm)
+   255→    if (durationMin <= 0) durationMin += 24 * 60 // handle overnight blocks
+   256→    const startISO = `${selectedDate}T${data.startTime.padStart(5, '0')}:00`
+   257→    const endISO = `${selectedDate}T${data.endTime.padStart(5, '0')}:00`
+   258→    const newBlock: SimBlock = {
+   259→      id: `custom-${Date.now()}`,
+   260→      name: data.name,
+   261→      section: data.section,
+   262→      stationFrom: data.stationFrom,
+   263→      stationTo: data.stationTo,
+   264→      startTime: startISO,
+   265→      endTime: endISO,
+   266→      duration: durationMin,
+   267→      department: data.department,
+   268→      status: 'edited',
+   269→      planId: activePlan.id,
+   270→      line: (data.line as SimBlock['line']) || 'both',
+   271→      isAiRecommended: false,
+   272→      aiConfidence: 0,
+   273→      aiReasoning: '',
+   274→      maintenanceReqIds: [],
+   275→    }
+   276→    setCustomBlocks(prev => {
+   277→      const next = [...prev, newBlock]
+   278→      persistManualBlocks(next as (SimBlock & { isManual: true })[])
+   279→      return next
+   280→    })
+   281→    // Link the block to the active custom plan (persisted + server)
+   282→    if (isCustomPlanActive) {
+   283→      setCustomPlans(addBlockToCustomPlan(activePlan.id, newBlock.id))
+   284→      void linkServerCustomPlanBlock(activePlan.id, newBlock.id)
+   285→    }
+   286→    // Write-through to the server (non-blocking)
+   287→    void createServerManualBlock(newBlock as (SimBlock & { isManual: true }))
+   288→    toast.success(`Block "${data.name}" added to the plan`, {
+   289→      description: `${data.section} · ${durationMin} min · ${format(parseISO(startISO), 'MMM d, HH:mm')}`,
+   290→    })
+   291→    handleSelectBlock(newBlock.id)
+   292→  }
+   293→
+   294→  // Drag-and-drop / keyboard reschedule of a manual block on the timeline.
+   295→  // newStartH is snapped to 15 min and clamped to [0, 24h − duration] by the timeline;
+   296→  // conflictBlockNames lists same-day blocks the proposed slot overlaps (live warning).
+   297→  const handleMoveBlock = useCallback((blockId: string, newStartH: number, conflictBlockNames: string[] = [], source: 'drag' | 'keyboard' = 'drag') => {
+   298→    const block = customBlocks.find((b) => b.id === blockId)
+   299→    if (!block) return
+   300→    const durationMin = Math.max(block.duration, 15)
+   301→    const startTotal = Math.round(newStartH * 60)
+   302→    const endTotal = Math.min(24 * 60, startTotal + durationMin)
+   303→    const pad = (n: number) => n.toString().padStart(2, '0')
+   304→    const sh = Math.floor(startTotal / 60)
+   305→    const sm = startTotal % 60
+   306→    const eh = Math.floor(endTotal / 60)
+   307→    const em = endTotal % 60
+   308→    const startTime = `${selectedDate}T${pad(sh)}:${pad(sm)}:00`
+   309→    const endTime = `${selectedDate}T${pad(eh)}:${pad(em)}:00`
+   310→    if (startTime === block.startTime && endTime === block.endTime) return
+   311→
+   312→    const previous = { startTime: block.startTime, endTime: block.endTime, duration: block.duration }
+   313→    const nextTimes = { startTime, endTime, duration: endTotal - startTotal }
+   314→
+   315→    // localStorage is written on every mutation, so it is always the freshest full list
+   316→    const applyTimes = (times: { startTime: string; endTime: string; duration: number }) => {
+   317→      setCustomBlocks((prev) => prev.map((b) => (b.id === blockId ? { ...b, ...times } : b)))
+   318→      persistManualBlocks(loadManualBlocks().map((b) => (b.id === blockId ? { ...b, ...times } : b)) as (SimBlock & { isManual: true })[])
+   319→      void updateServerManualBlock(blockId, times)
+   320→    }
+   321→    applyTimes(nextTimes)
+   322→
+   323→    const oldLabel = previous.startTime.split('T')[1]?.slice(0, 5) ?? ''
+   324→    const newLabel = `${pad(sh)}:${pad(sm)}`
+   325→    const undoAction = {
+   326→      label: 'Undo',
+   327→      onClick: () => {
+   328→        applyTimes(previous)
+   329→        toast.success('Reschedule reverted', {
+   330→          description: `${block.name} restored to ${oldLabel}`,
+   331→        })
+   332→      },
+   333→    }
+   334→    if (conflictBlockNames.length > 0) {
+   335→      toast.warning('Block moved — overlaps detected', {
+   336→        description: `${block.name}: ${oldLabel} → ${newLabel} · overlaps ${conflictBlockNames.slice(0, 2).join(', ')}${conflictBlockNames.length > 2 ? ` +${conflictBlockNames.length - 2} more` : ''}`,
+   337→        action: undoAction,
+   338→        duration: 9000,
+   339→      })
+   340→    } else if (source !== 'keyboard') {
+   341→      // Keyboard nudges stay silent on success — the block visibly moves; no toast spam
+   342→      toast.success('Block rescheduled', {
+   343→        description: `${block.name}: ${oldLabel} → ${newLabel} (saved to server)`,
+   344→        action: undoAction,
+   345→        duration: 8000,
+   346→      })
+   347→    }
+   348→  }, [customBlocks, selectedDate])
+   349→
+   350→  // Effective plan block ids — applies the section/department filters + manual blocks
+   351→  const effectivePlanBlockIds = useMemo(() => {
+   352→    let ids = activePlan.blockIds.filter((id) => {
+   353→      const b = allBlocks.find((blk) => blk.id === id)
+   354→      if (!b) return false
+   355→      if (sectionFilter !== 'all' && b.section !== sectionFilter) return false
+   356→      if (deptFilter !== 'all' && b.department !== deptFilter) return false
+   357→      return true
+   358→    })
+   359→    // Manual blocks belong to the plan they were created under
+   360→    ids = [...ids, ...customBlocks.filter((b) => b.planId === activePlan.id).map((b) => b.id)]
+   361→    return ids
+   362→  }, [activePlan, allBlocks, sectionFilter, deptFilter, customBlocks])
+   363→
+   364→  const planBlocks = allBlocks.filter((b) => effectivePlanBlockIds.includes(b.id))
+   365→  const totalBlocks = planBlocks.length
+   366→  const aiRecommended = planBlocks.filter((b) => b.isAiRecommended).length
+   367→  const planConflicts = conflicts.filter((c) => !c.resolved)
+   368→  const criticalConflicts = planConflicts.filter((c) => c.severity === 'critical').length
+   369→  const totalHours = planBlocks.reduce((sum, b) => sum + b.duration, 0) / 60
+   370→  const departmentsInvolved = new Set(planBlocks.map((b) => b.department)).size
+   371→
+   372→  const dayLabels: { date: string; label: string; dayNum: number; hasBlocks: boolean; isToday: boolean }[] = []
+   373→  const planEnd = parseISO(activePlan.endDate)
+   374→  let d = planStart
+   375→  while (d <= planEnd) {
+   376→    const dateStr = format(d, 'yyyy-MM-dd')
+   377→    const hasBlocks = planBlocks.some((b) => {
+   378→      const bDate = new Date(b.startTime).toISOString().split('T')[0]
+   379→      return bDate === dateStr
+   380→    })
+   381→    dayLabels.push({ date: dateStr, label: format(d, 'EEE'), dayNum: d.getDate(), hasBlocks, isToday: isToday(d) })
+   382→    d = addDays(d, 1)
+   383→  }
+   384→
+   385→  // Detail panel content
+   386→  const detailContent = selectedBlock ? (
+   387→    <div className="p-4 space-y-3">
+   388→      {/* Duration Optimizer toggle */}
+   389→      <div className="flex items-center gap-2">
+   390→        <Button
+   391→          variant={optimizerVisible ? 'default' : 'outline'}
+   392→          size="sm"
+   393→          className={cn(
+   394→            'text-[10px] h-7 px-2.5 gap-1.5',
+   395→            optimizerVisible ? 'bg-[#283593] hover:bg-[#0d47a1] text-white' : 'text-[#283593] border-[#9fa8da] hover:bg-[#e8eaf6] dark:text-[#3f51b5] dark:border-[#1a237e] dark:hover:bg-[#0d1442]/30',
+   396→          )}
+   397→          onClick={() => setOptimizerVisible(!optimizerVisible)}
+   398→        >
+   399→          <Brain className="w-3.5 h-3.5" />
+   400→          Duration Optimizer
+   401→        </Button>
+   402→      </div>
+   403→
+   404→      {/* Duration Optimizer panel */}
+   405→      {optimizerVisible && (
+   406→        <BlockDurationOptimizer
+   407→          blockId={selectedBlockId}
+   408→          currentDuration={selectedBlock.duration}
+   409→          onApply={handleApplyDuration}
+   410→        />
+   411→      )}
+   412→
+   413→      {selectedBlock.isAiRecommended ? (
+   414→        <>
+   415→          <AiRecommendationPanel
+   416→            block={selectedBlock}
+   417→            onAccept={() => { handleBlockStatusChange(selectedBlock.id, 'edited'); setSelectedBlockId(null); setDetailSheetOpen(false) }}
+   418→            onEdit={() => setManualFormOpen(true)}
+   419→            onReject={() => { handleBlockStatusChange(selectedBlock.id, 'rejected'); setSelectedBlockId(null); setDetailSheetOpen(false) }}
+   420→          />
+   421→          <BlockDetailPanel
+   422→            block={selectedBlock}
+   423→            onEdit={() => setManualFormOpen(true)}
+   424→            onClose={() => { setSelectedBlockId(null); setDetailSheetOpen(false) }}
+   425→            onReject={() => handleBlockStatusChange(selectedBlock.id, 'rejected')}
+   426→            onAdvance={(next) => handleBlockStatusChange(selectedBlock.id, next)}
+   427→          />
+   428→        </>
+   429→      ) : (
+   430→        <BlockDetailPanel
+   431→          block={selectedBlock}
+   432→          onEdit={() => setManualFormOpen(true)}
+   433→          onClose={() => { setSelectedBlockId(null); setDetailSheetOpen(false) }}
+   434→          onReject={() => handleBlockStatusChange(selectedBlock.id, 'rejected')}
+   435→          onAdvance={(next) => handleBlockStatusChange(selectedBlock.id, next)}
+   436→        />
+   437→      )}
+   438→    </div>
+   439→  ) : null
+   440→
+   441→  return (
+   442→    <div className="flex flex-col h-full print-area">
+   443→      {/* Print Header - hidden on screen, visible when printing */}
+   444→      <PrintHeader
+   445→        title="RailOpt AI — Block Planning Schedule"
+   446→        corridor={corridors[0]?.name ?? 'Railway Corridor'}
+   447→        planName={activePlan.name}
+   448→      />
+   449→
+   450→      {/* Header */}
+   451→      <div className="flex items-center justify-between gap-4 px-4 sm:px-6 pt-4 pb-2">
+   452→        <div className="flex items-center gap-3">
+   453→          <CalendarClock className="h-5 w-5 text-[#283593]" />
+   454→          <h1 className="text-lg font-semibold text-foreground">Planning</h1>
+   455→        </div>
+   456→        <div className="flex items-center gap-2">
+   457→          <Tabs
+   458→            value={isCustomPlanActive ? 'custom-active' : planTab}
+   459→            onValueChange={(v) => {
+   460→              setPlanTab(v as 'weekly' | 'monthly')
+   461→              setSelectedPlanId(null)
+   462→            }}
+   463→          >
+   464→            <TabsList className="h-8">
+   465→              <TabsTrigger value="weekly" className="text-xs px-3 h-7">Weekly</TabsTrigger>
+   466→              <TabsTrigger value="monthly" className="text-xs px-3 h-7">Monthly</TabsTrigger>
+   467→            </TabsList>
+   468→          </Tabs>
+   469→          {/* Print Schedule button */}
+   470→          <Button
+   471→            variant="outline"
+   472→            size="sm"
+   473→            className="text-xs h-8 min-h-[44px] sm:h-8 gap-1.5"
+   474→            onClick={() => window.print()}
+   475→          >
+   476→            <Printer className="h-3.5 w-3.5" />
+   477→            <span className="hidden sm:inline">Print Schedule</span>
+   478→            <span className="sm:hidden">Print</span>
+   479→          </Button>
+   480→        </div>
+   481→      </div>
+   482→
+   483→      {/* Plan info strip — plan selector + status */}
+   484→      <div className="flex items-center gap-3 px-4 sm:px-6 pb-2 flex-wrap">
+   485→        <Select
+   486→          value={activePlan.id}
+   487→          onValueChange={(id) => {
+   488→            const base = plans.find((p) => p.id === id)
+   489→            if (base) {
+   490→              setSelectedPlanId(null)
+   491→              setPlanTab(base.type === 'monthly' ? 'monthly' : 'weekly')
+   492→            } else {
+   493→              setSelectedPlanId(id)
+   494→              const custom = customPlans.find((p) => p.id === id)
+   495→              toast.info(`Viewing "${custom?.name ?? 'custom plan'}"`, {
+   496→                description: 'Blocks you add are linked to this custom plan',
+   497→              })
+   498→            }
+   499→          }}
+   500→        >
+   501→          <SelectTrigger size="sm" className="w-full sm:w-[320px] text-xs h-9 min-h-[44px] sm:h-8 gap-1.5" aria-label="Select plan">
+   502→            <CalendarClock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+   503→            <SelectValue />
+   504→          </SelectTrigger>
+   505→          <SelectContent>
+   506→            <SelectGroup>
+   507→              <SelectLabel className="text-[10px]">Standard Plans</SelectLabel>
+   508→              {plans.map((p) => (
+   509→                <SelectItem key={p.id} value={p.id} className="text-xs">
+   510→                  {p.name}
+   511→                </SelectItem>
+   512→              ))}
+   513→            </SelectGroup>
+   514→            {customPlans.length > 0 && (
+   515→              <SelectGroup>
+   516→                <SelectLabel className="text-[10px]">My Custom Plans</SelectLabel>
+   517→                {customPlans.map((p) => (
+   518→                  <SelectItem key={p.id} value={p.id} className="text-xs">
+   519→                    {p.name} · Custom
+   520→                  </SelectItem>
+   521→                ))}
+   522→              </SelectGroup>
+   523→            )}
+   524→          </SelectContent>
+   525→        </Select>
+   526→        <Badge variant="outline" className={cn('rounded-full text-[10px] px-2 py-0 h-5', PLAN_STATUS_CONFIG[activePlan.status]?.className || '')}>
+   527→          {PLAN_STATUS_CONFIG[activePlan.status]?.label || activePlan.status}
+   528→        </Badge>
+   529→        {isCustomPlanActive && (
+   530→          <Badge variant="outline" className="rounded-full text-[10px] px-2 py-0 h-5 bg-[#fff7ed] text-[#c2570b] border-[#fdba74] dark:bg-orange-950/30 dark:text-orange-400 dark:border-orange-800">
+   531→            Custom Plan
+   532→          </Badge>
+   533→        )}
+   534→        <span className="text-xs text-muted-foreground">v{activePlan.version}</span>
+   535→      </div>
+   536→
+   537→      {/* Filter bar - stacks on mobile */}
+   538→      <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2 sm:gap-2 px-4 sm:px-6 pb-3 py-2 bg-muted/30 rounded-lg mx-4 sm:mx-6 border border-border/50">
+   539→        <div className="flex items-center gap-2">
+   540→          <Filter className="h-3.5 w-3.5 text-muted-foreground" />
+   541→          <Select value={sectionFilter} onValueChange={setSectionFilter}>
+   542→            <SelectTrigger size="sm" className="w-full sm:w-[140px] text-xs h-9 min-h-[44px] sm:h-8">
+   543→              <SelectValue placeholder="Section" />
+   544→            </SelectTrigger>
+   545→            <SelectContent>
+   546→              <SelectItem value="all">All Sections</SelectItem>
+   547→              {corridors.map((c) => (
+   548→                <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>
+   549→              ))}
+   550→            </SelectContent>
+   551→          </Select>
+   552→          <Select value={deptFilter} onValueChange={setDeptFilter}>
+   553→            <SelectTrigger size="sm" className="w-full sm:w-[130px] text-xs h-9 min-h-[44px] sm:h-8">
+   554→              <SelectValue placeholder="Department" />
+   555→            </SelectTrigger>
+   556→            <SelectContent>
+   557→              <SelectItem value="all">All Departments</SelectItem>
+   558→              <SelectItem value="engineering">Engineering</SelectItem>
+   559→              <SelectItem value="snt">S&T</SelectItem>
+   560→              <SelectItem value="traction">Traction</SelectItem>
+   561→              <SelectItem value="combined">Combined</SelectItem>
+   562→            </SelectContent>
+   563→          </Select>
+   564→        </div>
+   565→
+   566→        <div className="flex items-center gap-2 sm:ml-auto">
+   567→          <Button
+   568→            size="sm"
+   569→            className={cn(
+   570→              "bg-[#283593] hover:bg-[#0d47a1] text-white text-xs h-9 min-h-[44px] sm:h-8 gap-1.5 relative overflow-hidden",
+   571→              !isOptimizing && "animate-[shimmer_2s_infinite]"
+   572→            )}
+   573→            onClick={runOptimization}
+   574→            disabled={isOptimizing}
+   575→          >
+   576→            {!isOptimizing && (
+   577→              <span className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent animate-[shimmer-sweep_2.5s_infinite]" />
+   578→            )}
+   579→            <Sparkles className="h-3.5 w-3.5" />
+   580→            <span className="hidden sm:inline">Run AI Optimization</span>
+   581→            <span className="sm:hidden">AI Optimize</span>
+   582→          </Button>
+   583→          <Button
+   584→            variant="outline"
+   585→            size="sm"
+   586→            className="text-xs h-9 min-h-[44px] sm:h-8 gap-1.5"
+   587→            onClick={() => setManualFormOpen(true)}
+   588→          >
+   589→            <Plus className="h-3.5 w-3.5" />
+   590→            <span className="hidden sm:inline">Manual Add Block</span>
+   591→            <span className="sm:hidden">Add Block</span>
+   592→          </Button>
+   593→        </div>
+   594→      </div>
+   595→
+   596→      <Separator />
+   597→
+   598→      {/* Track Data - Collapsible section */}
+   599→      <div className="px-4 sm:px-6 py-2">
+   600→        <div className="flex items-center justify-between">
+   601→          <div className="flex items-center gap-2 border-l-2 border-[#1a237e]/40 pl-2">
+   602→            <Gauge className="h-4 w-4 text-[#283593] dark:text-[#3f51b5]" />
+   603→            <h2 className="text-sm font-semibold">Track Data</h2>
+   604→          </div>
+   605→          <Button
+   606→            variant="ghost"
+   607→            size="sm"
+   608→            className="h-7 text-xs gap-1 text-muted-foreground hover:text-foreground"
+   609→            onClick={() => setTrackDataVisible(!trackDataVisible)}
+   610→          >
+   611→            {trackDataVisible ? (
+   612→              <>Hide <ChevronUp className="h-3 w-3" /></>
+   613→            ) : (
+   614→              <>Show <ChevronDown className="h-3 w-3" /></>
+   615→            )}
+   616→          </Button>
+   617→        </div>
+   618→      </div>
+   619→      {trackDataVisible && (
+   620→        <motion.div
+   621→          initial={{ opacity: 0, height: 0 }}
+   622→          animate={{ opacity: 1, height: 'auto' }}
+   623→          exit={{ opacity: 0, height: 0 }}
+   624→          transition={{ duration: 0.2 }}
+   625→          className="px-4 sm:px-6 pb-3"
+   626→        >
+   627→          <TrackGeometryPanel />
+   628→        </motion.div>
+   629→      )}
+   630→
+   631→      <Separator />
+   632→
+   633→      {/* Mini Stats Summary - wraps on mobile */}
+   634→      <div className="flex flex-wrap items-center gap-2 sm:gap-4 px-4 sm:px-6 py-2.5 bg-muted/50 border-y border-border/30 text-xs">
+   635→        <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-card border border-border/50">
+   636→          <Clock className="h-3 w-3 text-muted-foreground" />
+   637→          <span className="text-muted-foreground hidden sm:inline">Total Hours:</span>
+   638→          <span className="text-muted-foreground sm:hidden">Hrs:</span>
+   639→          <span className="font-semibold text-foreground">{totalHours.toFixed(1)}h</span>
+   640→        </span>
+   641→        <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-card border border-border/50">
+   642→          <Users className="h-3 w-3 text-muted-foreground" />
+   643→          <span className="text-muted-foreground hidden sm:inline">Departments:</span>
+   644→          <span className="text-muted-foreground sm:hidden">Depts:</span>
+   645→          <span className="font-semibold text-foreground">{departmentsInvolved}</span>
+   646→        </span>
+   647→        <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-card border border-border/50">
+   648→          <Blocks className="h-3 w-3 text-muted-foreground" />
+   649→          <span className="text-muted-foreground">Blocks:</span>
+   650→          <span className="font-semibold text-foreground">{totalBlocks}</span>
+   651→        </span>
+   652→        <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-card border border-border/50">
+   653→          <Bot className="h-3 w-3 text-[#1a237e]" />
+   654→          <span className="text-muted-foreground">AI:</span>
+   655→          <span className="font-semibold text-[#283593]">{aiRecommended}</span>
+   656→        </span>
+   657→        {criticalConflicts > 0 ? (
+   658→          <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-red-50 border border-red-200 text-red-600 font-medium">
+   659→            <AlertTriangle className="h-3 w-3" />
+   660→            {criticalConflicts} conflict{criticalConflicts > 1 ? 's' : ''}
+   661→          </span>
+   662→        ) : (
+   663→          <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-600">
+   664→            <CheckCircle2 className="h-3 w-3" />
+   665→            No conflicts
+   666→          </span>
+   667→        )}
+   668→      </div>
+   669→
+   670→      <Separator />
+   671→
+   672→      {/* Main content: Timeline + Detail Panel */}
+   673→      <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
+   674→        {/* Left: Timeline */}
+   675→        <div className="flex-1 flex flex-col overflow-hidden">
+   676→          {/* Day selector - scrollable with visible scroll */}
+   677→          <div className="flex items-center gap-2 px-4 sm:px-6 py-2.5 border-b border-border bg-background">
+   678→            <Button variant="ghost" size="sm" className="h-9 w-9 min-h-[44px] min-w-[44px] sm:h-7 sm:w-7 sm:min-h-0 sm:min-w-0 p-0" onClick={goPrevDay}>
+   679→              <ChevronLeft className="h-4 w-4" />
+   680→            </Button>
+   681→
+   682→            {/* Day Pills - horizontally scrollable */}
+   683→            <div className="flex items-center gap-1 overflow-x-auto scrollbar-thin">
+   684→              {dayLabels.map((day) => (
+   685→                <button
+   686→                  key={day.date}
+   687→                  className={cn(
+   688→                    'flex flex-col items-center px-2.5 py-1.5 rounded-lg text-[10px] transition-all duration-150 shrink-0 min-w-[40px] min-h-[44px] justify-center sm:min-h-0',
+   689→                    day.date === selectedDate
+   690→                      ? 'bg-[#283593] text-white shadow-sm shadow-[#283593]/25'
+   691→                      : day.isToday
+   692→                      ? 'bg-[#e8eaf6] text-[#0d47a1] ring-1 ring-[#5c6bc0] font-medium'
+   693→                      : 'text-muted-foreground hover:bg-muted/50',
+   694→                  )}
+   695→                  onClick={() => setSelectedDate(day.date)}
+   696→                >
+   697→                  <span className="text-[9px] uppercase">{day.label}</span>
+   698→                  <span className={cn('text-sm leading-tight', day.date === selectedDate ? 'font-bold' : 'font-medium')}>{day.dayNum}</span>
+   699→                  {day.hasBlocks && (
+   700→                    <span className={cn('h-1.5 w-1.5 rounded-full mt-0.5', day.date === selectedDate ? 'bg-background' : 'bg-[#1a237e]')} />
+   701→                  )}
+   702→                </button>
+   703→              ))}
+   704→            </div>
+   705→
+   706→            <Button variant="ghost" size="sm" className="h-9 w-9 min-h-[44px] min-w-[44px] sm:h-7 sm:w-7 sm:min-h-0 sm:min-w-0 p-0" onClick={goNextDay}>
+   707→              <ChevronRight className="h-4 w-4" />
+   708→            </Button>
+   709→
+   710→            <span className="text-xs font-medium text-foreground ml-2 hidden sm:inline">
+   711→              {format(parseISO(selectedDate), 'EEEE, MMMM d, yyyy')}
+   712→            </span>
+   713→            <span className="text-xs font-medium text-foreground ml-2 sm:hidden">
+   714→              {format(parseISO(selectedDate), 'EEE, MMM d')}
+   715→            </span>
+   716→          </div>
+   717→
+   718→          {/* Optimization progress */}
+   719→          {(isOptimizing || optimizationDone) && (
+   720→            <div className="px-4 sm:px-6 py-3">
+   721→              <OptimizationProgress isRunning={isOptimizing} onComplete={onOptimizationComplete} />
+   722→            </div>
+   723→          )}
+   724→
+   725→          {/* Timeline/Gantt toggle */}
+   726→          <div className="flex items-center gap-0.5 px-4 sm:px-6 py-1.5 border-b border-border bg-muted/10">
+   727→            <div className="flex items-center bg-muted/50 rounded-md p-0.5 gap-0">
+   728→              <Button
+   729→                variant={timelineMode === 'timeline' ? 'secondary' : 'ghost'}
+   730→                size="sm"
+   731→                className={cn("text-[10px] h-6 px-2.5 gap-1 rounded-sm", timelineMode === 'timeline' && "shadow-sm")}
+   732→                onClick={() => setTimelineMode('timeline')}
+   733→              >
+   734→                <List className="h-3 w-3" />Timeline
+   735→              </Button>
+   736→              <Button
+   737→                variant={timelineMode === 'gantt' ? 'secondary' : 'ghost'}
+   738→                size="sm"
+   739→                className={cn("text-[10px] h-6 px-2.5 gap-1 rounded-sm", timelineMode === 'gantt' && "shadow-sm")}
+   740→                onClick={() => setTimelineMode('gantt')}
+   741→              >
+   742→                <GanttChart className="h-3 w-3" />Gantt
+   743→              </Button>
+   744→              <Button
+   745→                variant={timelineMode === 'crew' ? 'secondary' : 'ghost'}
+   746→                size="sm"
+   747→                className={cn("text-[10px] h-6 px-2.5 gap-1 rounded-sm", timelineMode === 'crew' && "shadow-sm")}
+   748→                onClick={() => setTimelineMode('crew')}
+   749→              >
+   750→                <HardHat className="h-3 w-3" />Crew
+   751→              </Button>
+   752→            </div>
+   753→          </div>
+   754→
+   755→          {/* Timeline / Gantt / Crew - horizontally scrollable on mobile */}
+   756→          <div className="flex-1 overflow-hidden print-keep dot-grid relative">
+   757→            {timelineMode === 'crew' ? (
+   758→              <div className="h-full px-2 sm:px-4 md:px-6 py-3 overflow-auto">
+   759→                <CrewSchedulingPanel />
+   760→              </div>
+   761→            ) : timelineMode === 'timeline' ? (
+   762→              <div className="h-full px-2 sm:px-4 md:px-6 py-3 overflow-auto">
+   763→                {isMobile && (
+   764→                  <div className="text-[10px] text-muted-foreground mb-2 flex items-center gap-1">
+   765→                    <span>↔ Pinch or scroll to zoom timeline</span>
+   766→                  </div>
+   767→                )}
+   768→                <BlockTimeline
+   769→                  selectedDate={selectedDate}
+   770→                  selectedBlockId={selectedBlockId}
+   771→                  onSelectBlock={handleSelectBlock}
+   772→                  planBlockIds={effectivePlanBlockIds}
+   773→                  extraBlocks={customBlocks}
+   774→                  onMoveBlock={handleMoveBlock}
+   775→                />
+   776→              </div>
+   777→            ) : (
+   778→              <GanttView
+   779→                selectedBlockId={selectedBlockId}
+   780→                onSelectBlock={handleSelectBlock}
+   781→                planBlockIds={effectivePlanBlockIds}
+   782→                extraBlocks={customBlocks}
+   783→                onMoveBlock={handleMoveBlock}
+   784→              />
+   785→            )}
+   786→          </div>
+   787→        </div>
+   788→
+   789→        {/* Right: Detail panel - Sheet on mobile, side panel on desktop */}
+   790→        {isMobile ? (
+   791→          <Sheet open={detailSheetOpen} onOpenChange={(open) => { setDetailSheetOpen(open); if (!open) setSelectedBlockId(null) }}>
+   792→            <SheetContent side="bottom" className="h-[85vh] overflow-y-auto">
+   793→              <SheetHeader>
+   794→                <SheetTitle className="text-sm">Block Details</SheetTitle>
+   795→              </SheetHeader>
+   796→              {detailContent}
+   797→            </SheetContent>
+   798→          </Sheet>
+   799→        ) : (
+   800→          selectedBlock ? (
+   801→            <div className="w-full lg:w-[340px] xl:w-[380px] border-l border-border overflow-y-auto bg-background">
+   802→              {detailContent}
+   803→            </div>
+   804→          ) : (
+   805→            <div className="hidden lg:flex w-[340px] xl:w-[380px] border-l border-border items-center justify-center bg-muted/10">
+   806→              <div className="text-center text-muted-foreground">
+   807→                <Info className="h-8 w-8 mx-auto mb-2 opacity-30" />
+   808→                <p className="text-xs font-medium">Select a block to view details</p>
+   809→                <p className="text-[10px] mt-1">Click on any block in the timeline</p>
+   810→              </div>
+   811→            </div>
+   812→          )
+   813→        )}
+   814→      </div>
+   815→
+   816→      {/* Manual Block Form Dialog */}
+   817→      <ManualBlockForm
+   818→        open={manualFormOpen}
+   819→        onOpenChange={setManualFormOpen}
+   820→        onSubmit={handleCreateManualBlock}
+   821→      />
+   822→    </div>
+   823→  )
+   824→}
+   825→
