@@ -1,0 +1,130 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  role      String   @default("planner")
+  department String?
+  avatarUrl String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  maintenanceRequests MaintenanceRequest[]
+  auditLogs           AuditLog[]
+}
+
+model MaintenanceRequest {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  department  String
+  category    String?
+  section     String?
+  stationFrom String?
+  stationTo   String?
+  assetId     String?
+  priority    Float    @default(0)
+  severity    String   @default("medium")
+  safetyRisk  String   @default("low")
+  assetCriticality String @default("medium")
+  trafficImpact String @default("low")
+  isOverdue   Boolean  @default(false)
+  duration    Int      @default(120)
+  requestedDate DateTime?
+  status      String   @default("pending")
+  createdBy   String
+  blockId     String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  block      Block?       @relation(fields: [blockId], references: [id])
+  creator    User         @relation(fields: [createdBy], references: [id])
+  auditLogs  AuditLog[]
+}
+
+model Block {
+  id            String   @id @default(cuid())
+  name          String
+  section       String?
+  stationFrom   String?
+  stationTo     String?
+  startTime     DateTime
+  endTime       DateTime
+  duration      Int
+  department    String
+  status        String   @default("recommended")
+  planId        String?
+  corridorId   String?
+  line          String?
+  conflictIds   String?
+  isAiRecommended Boolean @default(false)
+  aiConfidence  Float?
+  aiReasoning   String?
+  verifiedBy   String?
+  approvedBy   String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  plan            Plan?              @relation(fields: [planId], references: [id])
+  maintenanceReqs MaintenanceRequest[]
+  auditLogs       AuditLog[]
+}
+
+model Plan {
+  id          String   @id @default(cuid())
+  name        String
+  type        String   @default("weekly")
+  startDate   DateTime
+  endDate     DateTime
+  status      String   @default("draft")
+  version     Int      @default(1)
+  createdBy   String
+  finalizedBy String?
+  approvedBy  String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  blocks     Block[]
+  auditLogs  AuditLog[]
+}
+
+model Conflict {
+  id          String   @id @default(cuid())
+  type        String
+  severity    String   @default("warning")
+  blockId     String?
+  trainId     String?
+  trainName   String?
+  trainType   String?
+  description String
+  resolved    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  action      String
+  entityType  String
+  entityId    String?
+  userId      String
+  userName    String?
+  details     String?
+  planId     String?
+  blockId    String?
+  requestId  String?
+  createdAt  DateTime @default(now())
+
+  plan    Plan?              @relation(fields: [planId], references: [id])
+  block   Block?             @relation(fields: [blockId], references: [id])
+  request MaintenanceRequest? @relation(fields: [requestId], references: [id])
+  user    User?              @relation(fields: [userId], references: [id])
+}

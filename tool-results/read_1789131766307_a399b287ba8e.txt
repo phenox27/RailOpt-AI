@@ -1,0 +1,1039 @@
+     1→'use client'
+     2→
+     3→import { useState } from 'react'
+     4→import { motion, AnimatePresence } from 'framer-motion'
+     5→import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+     6→import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card'
+     7→import { Badge } from '@/components/ui/badge'
+     8→import { Button } from '@/components/ui/button'
+     9→import { Input } from '@/components/ui/input'
+    10→import { Label } from '@/components/ui/label'
+    11→import { Switch } from '@/components/ui/switch'
+    12→import {
+    13→  Select,
+    14→  SelectContent,
+    15→  SelectItem,
+    16→  SelectTrigger,
+    17→  SelectValue,
+    18→} from '@/components/ui/select'
+    19→import {
+    20→  Table,
+    21→  TableBody,
+    22→  TableCell,
+    23→  TableHead,
+    24→  TableHeader,
+    25→  TableRow,
+    26→} from '@/components/ui/table'
+    27→import { Separator } from '@/components/ui/separator'
+    28→import { useAppStore, type Role } from '@/store/app-store'
+    29→import { useTheme } from 'next-themes'
+    30→import { departmentSummary, maintenanceRequests } from '@/data/simulated-data'
+    31→import { toast } from 'sonner'
+    32→import {
+    33→  Settings,
+    34→  User,
+    35→  Building2,
+    36→  Wifi,
+    37→  WifiOff,
+    38→  CalendarClock,
+    39→  Palette,
+    40→  Sun,
+    41→  Moon,
+    42→  Monitor,
+    43→  Check,
+    44→  Clock,
+    45→  Save,
+    46→  Info,
+    47→  Code2,
+    48→  Shield,
+    49→  Calendar,
+    50→  FileText,
+    51→  Bell,
+    52→  BellRing,
+    53→  Mail,
+    54→  Megaphone,
+    55→  AlertTriangle,
+    56→  CheckCircle2,
+    57→  Zap,
+    58→  MoonStar,
+    59→  Eye,
+    60→  LayoutGrid,
+    61→  List,
+    62→  Pencil,
+    63→  MapPin,
+    64→  LogOut,
+    65→} from 'lucide-react'
+    66→
+    67→const USERS = [
+    68→  { id: 'u-001', name: 'Jeet', role: 'planner', department: 'Planning', status: 'active', email: 'jeet@railopt.ai' },
+    69→  { id: 'u-002', name: 'Debarshi', role: 'engineering', department: 'Engineering', status: 'active', email: 'debarshi@railopt.ai' },
+    70→  { id: 'u-003', name: 'Rupam', role: 'snt', department: 'Signal & Telecom', status: 'active', email: 'rupam@railopt.ai' },
+    71→  { id: 'u-004', name: 'Alivia', role: 'traction', department: 'Traction Distribution', status: 'active', email: 'alivia@railopt.ai' },
+    72→  { id: 'u-005', name: 'Diya', role: 'control_office', department: 'Control Office', status: 'active', email: 'diya@railopt.ai' },
+    73→  { id: 'u-006', name: 'Dhittika', role: 'admin', department: 'Administration', status: 'active', email: 'dhittika@railopt.ai' },
+    74→  { id: 'u-007', name: 'Ramesh Gupta', role: 'engineering', department: 'Engineering', status: 'active', email: 'ramesh.gupta@railway.gov.in' },
+    75→  { id: 'u-008', name: 'Sunil Yadav', role: 'traction', department: 'Traction Distribution', status: 'inactive', email: 'sunil.yadav@railway.gov.in' },
+    76→]
+    77→
+    78→const ROLE_LABELS: Record<string, string> = {
+    79→  admin: 'Admin', planner: 'Planner', control_office: 'Control Office',
+    80→  engineering: 'Engineering', snt: 'S&T', traction: 'Traction',
+    81→}
+    82→
+    83→const ROLE_BADGE_COLORS: Record<string, string> = {
+    84→  admin: 'bg-red-50 text-red-700 border-red-200 dark:bg-red-950/30 dark:text-red-400 dark:border-red-800/50',
+    85→  planner: 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/30 dark:text-blue-400 dark:border-blue-800/50',
+    86→  control_office: 'bg-[#e8eaf6] text-[#0d47a1] border-[#9fa8da] dark:bg-[#1a237e]/30 dark:text-[#7986cb] dark:border-[#3f51b5]/50',
+    87→  engineering: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-400 dark:border-emerald-800/50',
+    88→  snt: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/30 dark:text-amber-400 dark:border-amber-800/50',
+    89→  traction: 'bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-950/30 dark:text-violet-400 dark:border-violet-800/50',
+    90→}
+    91→
+    92→const ACCENT_COLORS = [
+    93→  { name: 'Default', value: 'default', color: 'bg-blue-500' },
+    94→  { name: 'Teal', value: 'teal', color: 'bg-[#1a237e]' },
+    95→  { name: 'Emerald', value: 'emerald', color: 'bg-emerald-500' },
+    96→  { name: 'Violet', value: 'violet', color: 'bg-violet-500' },
+    97→  { name: 'Rose', value: 'rose', color: 'bg-rose-500' },
+    98→  { name: 'Amber', value: 'amber', color: 'bg-amber-500' },
+    99→]
+   100→
+   101→const tabContentVariants = {
+   102→  hidden: { opacity: 0, y: 12 },
+   103→  visible: { opacity: 1, y: 0, transition: { duration: 0.3, ease: 'easeOut' } },
+   104→  exit: { opacity: 0, y: -8, transition: { duration: 0.15 } },
+   105→}
+   106→
+   107→export function SettingsView() {
+   108→  const { isOffline, setOffline, lastSyncTime, currentUserName, currentUserEmail, currentRole, currentUserDepartment, lastLoginTime, isSessionActive } = useAppStore()
+   109→  const [displayName, setDisplayName] = useState(currentUserName)
+   110→  const [isEditingName, setIsEditingName] = useState(false)
+   111→  const { theme, setTheme } = useTheme()
+   112→  const [systemName, setSystemName] = useState('RailOpt AI')
+   113→  const [timezone, setTimezone] = useState('Asia/Kolkata')
+   114→  const [dateFormat, setDateFormat] = useState('dd MMM yyyy')
+   115→  const [planningHorizon, setPlanningHorizon] = useState('7')
+   116→  const [optimizationMode, setOptimizationMode] = useState('balanced')
+   117→  const [conflictThreshold, setConflictThreshold] = useState('medium')
+   118→  const [accentColor, setAccentColor] = useState('default')
+   119→  const [syncInterval, setSyncInterval] = useState('5')
+   120→  const [defaultBlockDuration, setDefaultBlockDuration] = useState('4')
+   121→  const [nightBlockStart, setNightBlockStart] = useState('22:00')
+   122→  const [nightBlockEnd, setNightBlockEnd] = useState('06:00')
+   123→  const [minBufferTime, setMinBufferTime] = useState('30')
+   124→  const [activeTab, setActiveTab] = useState('general')
+   125→
+   126→  // Notification preferences
+   127→  const [emailNotifications, setEmailNotifications] = useState(true)
+   128→  const [pushNotifications, setPushNotifications] = useState(false)
+   129→  const [conflictAlerts, setConflictAlerts] = useState(true)
+   130→  const [approvalReminders, setApprovalReminders] = useState(true)
+   131→  const [optimizationCompletion, setOptimizationCompletion] = useState(true)
+   132→  const [overdueAlerts, setOverdueAlerts] = useState(true)
+   133→  const [quietFrom, setQuietFrom] = useState('22:00')
+   134→  const [quietTo, setQuietTo] = useState('07:00')
+   135→
+   136→  // Display preferences
+   137→  const [compactMode, setCompactMode] = useState(false)
+   138→  const [animationEnabled, setAnimationEnabled] = useState(true)
+   139→  const [defaultView, setDefaultView] = useState('dashboard')
+   140→  const [itemsPerPage, setItemsPerPage] = useState('25')
+   141→
+   142→  const deptRequestCounts = departmentSummary.map(d => ({
+   143→    ...d,
+   144→    requestCount: maintenanceRequests.filter(m => m.department === d.code).length,
+   145→  }))
+   146→
+   147→  const handleSave = (tabName: string) => {
+   148→    toast.success(`${tabName} settings saved`, {
+   149→      description: 'Your changes have been applied successfully.',
+   150→    })
+   151→  }
+   152→
+   153→  return (
+   154→    <div className="flex flex-col h-full min-h-0">
+   155→      <div className="flex items-center gap-3 px-4 sm:px-6 pt-4 sm:pt-6 pb-2">
+   156→        <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-muted shrink-0">
+   157→          <Settings className="w-5 h-5 text-muted-foreground" />
+   158→        </div>
+   159→        <div>
+   160→          <h1 className="text-lg sm:text-xl font-semibold text-foreground">Settings</h1>
+   161→          <p className="text-sm text-muted-foreground">System configuration and preferences</p>
+   162→        </div>
+   163→      </div>
+   164→
+   165→      <div className="flex-1 min-h-0 px-4 sm:px-6 pb-4 sm:pb-6 overflow-auto">
+   166→        <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
+   167→          {/* Scrollable tabs on mobile */}
+   168→          <div className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0 mb-4">
+   169→            <TabsList className="h-9">
+   170→              <TabsTrigger value="profile" className="text-xs whitespace-nowrap gap-1"><User className="h-3 w-3 hidden sm:inline" />Profile</TabsTrigger>
+   171→              <TabsTrigger value="general" className="text-xs whitespace-nowrap">General</TabsTrigger>
+   172→              <TabsTrigger value="notifications" className="text-xs whitespace-nowrap gap-1"><Bell className="h-3 w-3 hidden sm:inline" />Notifications</TabsTrigger>
+   173→              <TabsTrigger value="users" className="text-xs whitespace-nowrap">Users</TabsTrigger>
+   174→              <TabsTrigger value="departments" className="text-xs whitespace-nowrap">Departments</TabsTrigger>
+   175→              <TabsTrigger value="connectivity" className="text-xs whitespace-nowrap">Connectivity</TabsTrigger>
+   176→              <TabsTrigger value="planning" className="text-xs whitespace-nowrap">Planning</TabsTrigger>
+   177→              <TabsTrigger value="theme" className="text-xs whitespace-nowrap">Theme</TabsTrigger>
+   178→              <TabsTrigger value="about" className="text-xs whitespace-nowrap">About</TabsTrigger>
+   179→            </TabsList>
+   180→          </div>
+   181→
+   182→          <AnimatePresence mode="wait">
+   183→            {activeTab === 'profile' && (
+   184→              <motion.div key="profile" variants={tabContentVariants} initial="hidden" animate="visible" exit="exit">
+   185→                <TabsContent value="profile" className="mt-0 space-y-4">
+   186→                  {/* Profile Card */}
+   187→                  <Card>
+   188→                    <CardHeader>
+   189→                      <CardTitle className="text-sm">Profile</CardTitle>
+   190→                      <CardDescription className="text-xs">Your account information and preferences</CardDescription>
+   191→                    </CardHeader>
+   192→                    <CardContent className="space-y-4">
+   193→                      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+   194→                        {/* Avatar */}
+   195→                        <div className="relative">
+   196→                          <div className="flex items-center justify-center w-16 h-16 rounded-full bg-[#1a237e]/10 dark:bg-[#60a5fa]/10 border-2 border-[#1a237e]/20 dark:border-[#60a5fa]/20">
+   197→                            <span className="text-xl font-bold text-[#1a237e] dark:text-[#60a5fa]">
+   198→                              {(displayName || 'U').split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)}
+   199→                            </span>
+   200→                          </div>
+   201→                          <div className="absolute -bottom-1 -right-1 flex items-center justify-center w-5 h-5 rounded-full bg-emerald-500 border-2 border-background">
+   202→                            <CheckCircle2 className="w-3 h-3 text-white" />
+   203→                          </div>
+   204→                        </div>
+   205→                        {/* Name + Editable */}
+   206→                        <div className="flex-1 min-w-0 space-y-1">
+   207→                          {isEditingName ? (
+   208→                            <div className="flex items-center gap-2">
+   209→                              <Input
+   210→                                value={displayName}
+   211→                                onChange={(e) => setDisplayName(e.target.value)}
+   212→                                className="h-8 text-sm w-full sm:max-w-xs"
+   213→                                aria-label="Display name"
+   214→                                autoFocus
+   215→                              />
+   216→                              <Button
+   217→                                size="sm"
+   218→                                variant="outline"
+   219→                                className="h-8 text-xs gap-1"
+   220→                                onClick={() => {
+   221→                                  setIsEditingName(false)
+   222→                                  toast.success('Display name updated')
+   223→                                }}
+   224→                              >
+   225→                                <Check className="w-3 h-3" />
+   226→                                Save
+   227→                              </Button>
+   228→                              <Button
+   229→                                size="sm"
+   230→                                variant="ghost"
+   231→                                className="h-8 text-xs"
+   232→                                onClick={() => {
+   233→                                  setDisplayName(currentUserName)
+   234→                                  setIsEditingName(false)
+   235→                                }}
+   236→                              >
+   237→                                Cancel
+   238→                              </Button>
+   239→                            </div>
+   240→                          ) : (
+   241→                            <div className="flex items-center gap-2">
+   242→                              <h3 className="text-base font-semibold text-foreground">{displayName || 'User'}</h3>
+   243→                              <Button
+   244→                                size="sm"
+   245→                                variant="ghost"
+   246→                                className="h-6 w-6 p-0"
+   247→                                onClick={() => setIsEditingName(true)}
+   248→                                aria-label="Edit display name"
+   249→                              >
+   250→                                <Pencil className="w-3 h-3 text-muted-foreground" />
+   251→                              </Button>
+   252→                            </div>
+   253→                          )}
+   254→                          <p className="text-sm text-muted-foreground flex items-center gap-1.5">
+   255→                            <Mail className="w-3.5 h-3.5" />
+   256→                            {currentUserEmail || 'No email on file'}
+   257→                          </p>
+   258→                        </div>
+   259→                      </div>
+   260→
+   261→                      <Separator />
+   262→
+   263→                      {/* User Details Grid */}
+   264→                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+   265→                        <div className="space-y-1">
+   266→                          <Label className="text-xs text-muted-foreground">Role</Label>
+   267→                          <div className="flex items-center gap-2">
+   268→                            <Shield className="w-4 h-4 text-muted-foreground" />
+   269→                            <Badge variant="outline" className="text-xs">
+   270→                              {ROLE_LABELS[currentRole] || currentRole}
+   271→                            </Badge>
+   272→                          </div>
+   273→                        </div>
+   274→                        <div className="space-y-1">
+   275→                          <Label className="text-xs text-muted-foreground">Department</Label>
+   276→                          <div className="flex items-center gap-2">
+   277→                            <MapPin className="w-4 h-4 text-muted-foreground" />
+   278→                            <span className="text-sm">{currentUserDepartment || 'Not assigned'}</span>
+   279→                          </div>
+   280→                        </div>
+   281→                        <div className="space-y-1">
+   282→                          <Label className="text-xs text-muted-foreground">Session Status</Label>
+   283→                          <div className="flex items-center gap-2">
+   284→                            <div className={`w-2 h-2 rounded-full ${isSessionActive ? 'bg-emerald-500' : 'bg-muted-foreground/40'}`} aria-hidden="true" />
+   285→                            <span className="text-sm">{isSessionActive ? 'Active' : 'Inactive'}</span>
+   286→                          </div>
+   287→                        </div>
+   288→                        <div className="space-y-1">
+   289→                          <Label className="text-xs text-muted-foreground">Last Login</Label>
+   290→                          <div className="flex items-center gap-2">
+   291→                            <Clock className="w-4 h-4 text-muted-foreground" />
+   292→                            <span className="text-sm">
+   293→                              {lastLoginTime
+   294→                                ? new Date(lastLoginTime).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+   295→                                : 'N/A'
+   296→                              }
+   297→                            </span>
+   298→                          </div>
+   299→                        </div>
+   300→                      </div>
+   301→                    </CardContent>
+   302→                  </Card>
+   303→
+   304→                  {/* Session Info Card */}
+   305→                  <Card>
+   306→                    <CardHeader>
+   307→                      <CardTitle className="text-sm">Session Information</CardTitle>
+   308→                      <CardDescription className="text-xs">Current session details and security</CardDescription>
+   309→                    </CardHeader>
+   310→                    <CardContent>
+   311→                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+   312→                        <div className="space-y-1">
+   313→                          <p className="text-xs text-muted-foreground">User ID</p>
+   314→                          <p className="font-mono text-xs text-foreground">{useAppStore.getState().currentUserId || 'N/A'}</p>
+   315→                        </div>
+   316→                        <div className="space-y-1">
+   317→                          <p className="text-xs text-muted-foreground">Authentication</p>
+   318→                          <p className="text-xs text-foreground flex items-center gap-1">
+   319→                            <Shield className="w-3 h-3 text-emerald-500" />
+   320→                            Government SSO
+   321→                          </p>
+   322→                        </div>
+   323→                        <div className="space-y-1">
+   324→                          <p className="text-xs text-muted-foreground">Timezone</p>
+   325→                          <p className="text-xs text-foreground">Asia/Kolkata (IST)</p>
+   326→                        </div>
+   327→                      </div>
+   328→                    </CardContent>
+   329→                  </Card>
+   330→                </TabsContent>
+   331→              </motion.div>
+   332→            )}
+   333→
+   334→            {activeTab === 'general' && (
+   335→              <motion.div key="general" variants={tabContentVariants} initial="hidden" animate="visible" exit="exit">
+   336→                <TabsContent value="general" className="mt-0 space-y-4">
+   337→                  <Card>
+   338→                    <CardHeader>
+   339→                      <CardTitle className="text-sm">General Settings</CardTitle>
+   340→                      <CardDescription className="text-xs">Basic system configuration</CardDescription>
+   341→                    </CardHeader>
+   342→                    <CardContent className="space-y-4">
+   343→                      <div className="space-y-2">
+   344→                        <Label htmlFor="system-name" className="text-xs">System Name</Label>
+   345→                        <Input id="system-name" value={systemName} onChange={(e) => setSystemName(e.target.value)} className="h-9 sm:h-8 text-sm w-full sm:max-w-md" />
+   346→                      </div>
+   347→                      <div className="space-y-2">
+   348→                        <Label htmlFor="timezone" className="text-xs">Timezone</Label>
+   349→                        <Select value={timezone} onValueChange={setTimezone}>
+   350→                          <SelectTrigger className="w-full sm:w-[280px] h-9 sm:h-8 text-xs">
+   351→                            <SelectValue />
+   352→                          </SelectTrigger>
+   353→                          <SelectContent>
+   354→                            <SelectItem value="Asia/Kolkata">Asia/Kolkata (IST +5:30)</SelectItem>
+   355→                            <SelectItem value="UTC">UTC</SelectItem>
+   356→                            <SelectItem value="America/New_York">America/New_York (EST)</SelectItem>
+   357→                            <SelectItem value="Europe/London">Europe/London (GMT)</SelectItem>
+   358→                          </SelectContent>
+   359→                        </Select>
+   360→                      </div>
+   361→                      <div className="space-y-2">
+   362→                        <Label htmlFor="date-format" className="text-xs">Date Format</Label>
+   363→                        <Select value={dateFormat} onValueChange={setDateFormat}>
+   364→                          <SelectTrigger className="w-full sm:w-[200px] h-9 sm:h-8 text-xs">
+   365→                            <SelectValue />
+   366→                          </SelectTrigger>
+   367→                          <SelectContent>
+   368→                            <SelectItem value="dd MMM yyyy">27 Jan 2025</SelectItem>
+   369→                            <SelectItem value="yyyy-MM-dd">2025-01-27</SelectItem>
+   370→                            <SelectItem value="MM/dd/yyyy">01/27/2025</SelectItem>
+   371→                            <SelectItem value="dd/MM/yyyy">27/01/2025</SelectItem>
+   372→                          </SelectContent>
+   373→                        </Select>
+   374→                      </div>
+   375→                    </CardContent>
+   376→                    <CardFooter className="pt-2">
+   377→                      <Button size="sm" className="h-8 text-xs gap-1.5" onClick={() => handleSave('General')}>
+   378→                        <Save className="w-3.5 h-3.5" />
+   379→                        Save Changes
+   380→                      </Button>
+   381→                    </CardFooter>
+   382→                  </Card>
+   383→
+   384→                  {/* Display Sub-section */}
+   385→                  <Card>
+   386→                    <CardHeader>
+   387→                      <div className="flex items-center gap-2">
+   388→                        <Eye className="h-4 w-4 text-muted-foreground" />
+   389→                        <CardTitle className="text-sm">Display</CardTitle>
+   390→                      </div>
+   391→                      <CardDescription className="text-xs">Interface and layout preferences</CardDescription>
+   392→                    </CardHeader>
+   393→                    <CardContent className="space-y-4">
+   394→                      {/* Compact mode */}
+   395→                      <div className="flex items-center justify-between p-3 rounded-lg border border-border">
+   396→                        <div className="flex items-center gap-3">
+   397→                          <LayoutGrid className="h-4 w-4 text-muted-foreground shrink-0" />
+   398→                          <div>
+   399→                            <p className="text-sm font-medium">Compact Mode</p>
+   400→                            <p className="text-xs text-muted-foreground">Reduce padding and spacing for denser layouts</p>
+   401→                          </div>
+   402→                        </div>
+   403→                        <Switch checked={compactMode} onCheckedChange={setCompactMode} />
+   404→                      </div>
+   405→
+   406→                      {/* Animation toggle */}
+   407→                      <div className="flex items-center justify-between p-3 rounded-lg border border-border">
+   408→                        <div className="flex items-center gap-3">
+   409→                          <Zap className="h-4 w-4 text-muted-foreground shrink-0" />
+   410→                          <div>
+   411→                            <p className="text-sm font-medium">Animations</p>
+   412→                            <p className="text-xs text-muted-foreground">Enable smooth transitions and motion effects</p>
+   413→                          </div>
+   414→                        </div>
+   415→                        <Switch checked={animationEnabled} onCheckedChange={setAnimationEnabled} />
+   416→                      </div>
+   417→
+   418→                      <Separator />
+   419→
+   420→                      {/* Default view */}
+   421→                      <div className="space-y-2">
+   422→                        <Label htmlFor="default-view" className="text-xs">Default View</Label>
+   423→                        <Select value={defaultView} onValueChange={setDefaultView}>
+   424→                          <SelectTrigger className="w-full sm:w-[200px] h-9 sm:h-8 text-xs">
+   425→                            <SelectValue />
+   426→                          </SelectTrigger>
+   427→                          <SelectContent>
+   428→                            <SelectItem value="dashboard">Dashboard</SelectItem>
+   429→                            <SelectItem value="planning">Planning</SelectItem>
+   430→                            <SelectItem value="maintenance">Maintenance</SelectItem>
+   431→                          </SelectContent>
+   432→                        </Select>
+   433→                        <p className="text-[10px] text-muted-foreground">View shown when the application loads</p>
+   434→                      </div>
+   435→
+   436→                      {/* Items per page */}
+   437→                      <div className="space-y-2">
+   438→                        <Label htmlFor="items-per-page" className="text-xs">Items Per Page</Label>
+   439→                        <Select value={itemsPerPage} onValueChange={setItemsPerPage}>
+   440→                          <SelectTrigger className="w-full sm:w-[200px] h-9 sm:h-8 text-xs">
+   441→                            <SelectValue />
+   442→                          </SelectTrigger>
+   443→                          <SelectContent>
+   444→                            <SelectItem value="10">10</SelectItem>
+   445→                            <SelectItem value="25">25</SelectItem>
+   446→                            <SelectItem value="50">50</SelectItem>
+   447→                            <SelectItem value="100">100</SelectItem>
+   448→                          </SelectContent>
+   449→                        </Select>
+   450→                        <p className="text-[10px] text-muted-foreground">Number of items shown per page in list views</p>
+   451→                      </div>
+   452→                    </CardContent>
+   453→                    <CardFooter className="pt-2">
+   454→                      <Button size="sm" className="h-8 text-xs gap-1.5" onClick={() => handleSave('Display')}>
+   455→                        <Save className="w-3.5 h-3.5" />
+   456→                        Save Changes
+   457→                      </Button>
+   458→                    </CardFooter>
+   459→                  </Card>
+   460→                </TabsContent>
+   461→              </motion.div>
+   462→            )}
+   463→
+   464→            {activeTab === 'notifications' && (
+   465→              <motion.div key="notifications" variants={tabContentVariants} initial="hidden" animate="visible" exit="exit">
+   466→                <TabsContent value="notifications" className="mt-0 space-y-4">
+   467→                  {/* Notification Channels */}
+   468→                  <Card>
+   469→                    <CardHeader>
+   470→                      <div className="flex items-center gap-2">
+   471→                        <BellRing className="h-4 w-4 text-muted-foreground" />
+   472→                        <CardTitle className="text-sm">Notification Channels</CardTitle>
+   473→                      </div>
+   474→                      <CardDescription className="text-xs">How you receive notifications</CardDescription>
+   475→                    </CardHeader>
+   476→                    <CardContent className="space-y-3">
+   477→                      <div className="flex items-center justify-between p-3 rounded-lg border border-border">
+   478→                        <div className="flex items-center gap-3">
+   479→                          <Mail className="h-4 w-4 text-muted-foreground shrink-0" />
+   480→                          <div>
+   481→                            <p className="text-sm font-medium">Email Notifications</p>
+   482→                            <p className="text-xs text-muted-foreground">Receive alerts and updates via email</p>
+   483→                          </div>
+   484→                        </div>
+   485→                        <Switch checked={emailNotifications} onCheckedChange={setEmailNotifications} />
+   486→                      </div>
+   487→                      <div className="flex items-center justify-between p-3 rounded-lg border border-border">
+   488→                        <div className="flex items-center gap-3">
+   489→                          <Megaphone className="h-4 w-4 text-muted-foreground shrink-0" />
+   490→                          <div>
+   491→                            <p className="text-sm font-medium">Push Notifications</p>
+   492→                            <p className="text-xs text-muted-foreground">Receive browser push notifications</p>
+   493→                          </div>
+   494→                        </div>
+   495→                        <Switch checked={pushNotifications} onCheckedChange={setPushNotifications} />
+   496→                      </div>
+   497→                    </CardContent>
+   498→                  </Card>
+   499→
+   500→                  {/* Notification Types */}
+   501→                  <Card>
+   502→                    <CardHeader>
+   503→                      <div className="flex items-center gap-2">
+   504→                        <AlertTriangle className="h-4 w-4 text-muted-foreground" />
+   505→                        <CardTitle className="text-sm">Notification Types</CardTitle>
+   506→                      </div>
+   507→                      <CardDescription className="text-xs">Choose which events trigger notifications</CardDescription>
+   508→                    </CardHeader>
+   509→                    <CardContent className="space-y-3">
+   510→                      <div className="flex items-center justify-between p-3 rounded-lg border border-border">
+   511→                        <div className="flex items-center gap-3">
+   512→                          <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
+   513→                          <div>
+   514→                            <p className="text-sm font-medium">Conflict Alerts</p>
+   515→                            <p className="text-xs text-muted-foreground">Alert when train or department conflicts are detected</p>
+   516→                          </div>
+   517→                        </div>
+   518→                        <Switch checked={conflictAlerts} onCheckedChange={setConflictAlerts} />
+   519→                      </div>
+   520→                      <div className="flex items-center justify-between p-3 rounded-lg border border-border">
+   521→                        <div className="flex items-center gap-3">
+   522→                          <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
+   523→                          <div>
+   524→                            <p className="text-sm font-medium">Approval Reminders</p>
+   525→                            <p className="text-xs text-muted-foreground">Remind when blocks or plans await your approval</p>
+   526→                          </div>
+   527→                        </div>
+   528→                        <Switch checked={approvalReminders} onCheckedChange={setApprovalReminders} />
+   529→                      </div>
+   530→                      <div className="flex items-center justify-between p-3 rounded-lg border border-border">
+   531→                        <div className="flex items-center gap-3">
+   532→                          <Zap className="h-4 w-4 text-[#1a237e] shrink-0" />
+   533→                          <div>
+   534→                            <p className="text-sm font-medium">Optimization Completion</p>
+   535→                            <p className="text-xs text-muted-foreground">Notify when AI optimization finishes running</p>
+   536→                          </div>
+   537→                        </div>
+   538→                        <Switch checked={optimizationCompletion} onCheckedChange={setOptimizationCompletion} />
+   539→                      </div>
+   540→                      <div className="flex items-center justify-between p-3 rounded-lg border border-border">
+   541→                        <div className="flex items-center gap-3">
+   542→                          <Clock className="h-4 w-4 text-red-500 shrink-0" />
+   543→                          <div>
+   544→                            <p className="text-sm font-medium">Overdue Alerts</p>
+   545→                            <p className="text-xs text-muted-foreground">Alert when maintenance requests become overdue</p>
+   546→                          </div>
+   547→                        </div>
+   548→                        <Switch checked={overdueAlerts} onCheckedChange={setOverdueAlerts} />
+   549→                      </div>
+   550→                    </CardContent>
+   551→                  </Card>
+   552→
+   553→                  {/* Quiet Hours */}
+   554→                  <Card>
+   555→                    <CardHeader>
+   556→                      <div className="flex items-center gap-2">
+   557→                        <MoonStar className="h-4 w-4 text-muted-foreground" />
+   558→                        <CardTitle className="text-sm">Quiet Hours</CardTitle>
+   559→                      </div>
+   560→                      <CardDescription className="text-xs">Suppress non-critical notifications during specified hours</CardDescription>
+   561→                    </CardHeader>
+   562→                    <CardContent className="space-y-4">
+   563→                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+   564→                        <div className="space-y-2">
+   565→                          <Label htmlFor="quiet-from" className="text-xs">From</Label>
+   566→                          <Input
+   567→                            id="quiet-from"
+   568→                            type="time"
+   569→                            value={quietFrom}
+   570→                            onChange={(e) => setQuietFrom(e.target.value)}
+   571→                            className="h-9 sm:h-8 text-sm w-full sm:w-[160px]"
+   572→                          />
+   573→                        </div>
+   574→                        <div className="space-y-2">
+   575→                          <Label htmlFor="quiet-to" className="text-xs">To</Label>
+   576→                          <Input
+   577→                            id="quiet-to"
+   578→                            type="time"
+   579→                            value={quietTo}
+   580→                            onChange={(e) => setQuietTo(e.target.value)}
+   581→                            className="h-9 sm:h-8 text-sm w-full sm:w-[160px]"
+   582→                          />
+   583→                        </div>
+   584→                      </div>
+   585→                      <p className="text-[10px] text-muted-foreground flex items-center gap-1.5">
+   586→                        <MoonStar className="h-3 w-3" />
+   587→                        Critical alerts (safety violations, critical conflicts) will still be delivered during quiet hours.
+   588→                      </p>
+   589→                    </CardContent>
+   590→                    <CardFooter className="pt-2">
+   591→                      <Button size="sm" className="h-8 text-xs gap-1.5" onClick={() => handleSave('Notification')}>
+   592→                        <Save className="w-3.5 h-3.5" />
+   593→                        Save Preferences
+   594→                      </Button>
+   595→                    </CardFooter>
+   596→                  </Card>
+   597→                </TabsContent>
+   598→              </motion.div>
+   599→            )}
+   600→
+   601→            {activeTab === 'users' && (
+   602→              <motion.div key="users" variants={tabContentVariants} initial="hidden" animate="visible" exit="exit">
+   603→                <TabsContent value="users" className="mt-0">
+   604→                  <Card>
+   605→                    <CardHeader>
+   606→                      <CardTitle className="text-sm">User Management</CardTitle>
+   607→                      <CardDescription className="text-xs">{USERS.length} users registered</CardDescription>
+   608→                    </CardHeader>
+   609→                    <CardContent>
+   610→                      <div className="rounded-md border overflow-x-auto">
+   611→                        <Table>
+   612→                          <TableHeader>
+   613→                            <TableRow className="bg-muted/40">
+   614→                              <TableHead className="text-[11px] font-semibold h-8">Name</TableHead>
+   615→                              <TableHead className="text-[11px] font-semibold h-8">Role</TableHead>
+   616→                              <TableHead className="text-[11px] font-semibold h-8 hidden sm:table-cell">Department</TableHead>
+   617→                              <TableHead className="text-[11px] font-semibold h-8 hidden md:table-cell">Email</TableHead>
+   618→                              <TableHead className="text-[11px] font-semibold h-8">Status</TableHead>
+   619→                            </TableRow>
+   620→                          </TableHeader>
+   621→                          <TableBody>
+   622→                            {USERS.map((user) => (
+   623→                              <TableRow key={user.id} className="hover:bg-muted/30">
+   624→                                <TableCell className="text-xs font-medium py-2">
+   625→                                  <div className="flex items-center gap-2">
+   626→                                    <div className="w-6 h-6 rounded-full bg-muted flex items-center justify-center text-[10px] font-semibold text-muted-foreground shrink-0">
+   627→                                      {user.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
+   628→                                    </div>
+   629→                                    <div className="min-w-0">
+   630→                                      <span className="truncate block">{user.name}</span>
+   631→                                      <span className="text-muted-foreground block sm:hidden text-[10px]">{user.department}</span>
+   632→                                    </div>
+   633→                                  </div>
+   634→                                </TableCell>
+   635→                                <TableCell className="py-2">
+   636→                                  <Badge variant="outline" className={`text-[10px] px-1.5 py-0 h-4 ${ROLE_BADGE_COLORS[user.role] ?? ''}`}>
+   637→                                    {ROLE_LABELS[user.role] ?? user.role}
+   638→                                  </Badge>
+   639→                                </TableCell>
+   640→                                <TableCell className="text-xs py-2 hidden sm:table-cell">{user.department}</TableCell>
+   641→                                <TableCell className="text-xs py-2 text-muted-foreground hidden md:table-cell">{user.email}</TableCell>
+   642→                                <TableCell className="py-2">
+   643→                                  <Badge variant="outline" className={`text-[10px] px-1.5 py-0 h-4 ${
+   644→                                    user.status === 'active'
+   645→                                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+   646→                                      : 'bg-muted/50 text-muted-foreground border-border'
+   647→                                  }`}>
+   648→                                    {user.status}
+   649→                                  </Badge>
+   650→                                </TableCell>
+   651→                              </TableRow>
+   652→                            ))}
+   653→                          </TableBody>
+   654→                        </Table>
+   655→                      </div>
+   656→                    </CardContent>
+   657→                    <CardFooter className="pt-2">
+   658→                      <Button size="sm" className="h-8 text-xs gap-1.5" onClick={() => handleSave('User')}>
+   659→                        <Save className="w-3.5 h-3.5" />
+   660→                        Save Changes
+   661→                      </Button>
+   662→                    </CardFooter>
+   663→                  </Card>
+   664→                </TabsContent>
+   665→              </motion.div>
+   666→            )}
+   667→
+   668→            {activeTab === 'departments' && (
+   669→              <motion.div key="departments" variants={tabContentVariants} initial="hidden" animate="visible" exit="exit">
+   670→                <TabsContent value="departments" className="mt-0">
+   671→                  <Card>
+   672→                    <CardHeader>
+   673→                      <CardTitle className="text-sm">Departments</CardTitle>
+   674→                      <CardDescription className="text-xs">Department overview and request distribution</CardDescription>
+   675→                    </CardHeader>
+   676→                    <CardContent>
+   677→                      <div className="space-y-3">
+   678→                        {deptRequestCounts.map((dept) => (
+   679→                          <div key={dept.code} className="flex items-center gap-3 p-3 rounded-lg border border-border hover:border-border transition-colors">
+   680→                            <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: dept.color }} />
+   681→                            <div className="flex-1 min-w-0">
+   682→                              <p className="text-sm font-medium text-foreground">{dept.department}</p>
+   683→                              <p className="text-xs text-muted-foreground">{dept.code.toUpperCase()}</p>
+   684→                            </div>
+   685→                            <div className="flex items-center gap-3">
+   686→                              <div className="text-right">
+   687→                                <p className="text-sm font-semibold tabular-nums">{dept.requestCount}</p>
+   688→                                <p className="text-[10px] text-muted-foreground">requests</p>
+   689→                              </div>
+   690→                              <div className="text-right">
+   691→                                <p className="text-sm font-semibold tabular-nums">{dept.assigned}</p>
+   692→                                <p className="text-[10px] text-muted-foreground">assigned</p>
+   693→                              </div>
+   694→                            </div>
+   695→                          </div>
+   696→                        ))}
+   697→                      </div>
+   698→                    </CardContent>
+   699→                    <CardFooter className="pt-2">
+   700→                      <Button size="sm" className="h-8 text-xs gap-1.5" onClick={() => handleSave('Department')}>
+   701→                        <Save className="w-3.5 h-3.5" />
+   702→                        Save Changes
+   703→                      </Button>
+   704→                    </CardFooter>
+   705→                  </Card>
+   706→                </TabsContent>
+   707→              </motion.div>
+   708→            )}
+   709→
+   710→            {activeTab === 'connectivity' && (
+   711→              <motion.div key="connectivity" variants={tabContentVariants} initial="hidden" animate="visible" exit="exit">
+   712→                <TabsContent value="connectivity" className="mt-0">
+   713→                  <Card>
+   714→                    <CardHeader>
+   715→                      <CardTitle className="text-sm">Connectivity</CardTitle>
+   716→                      <CardDescription className="text-xs">Online/offline mode and synchronization</CardDescription>
+   717→                    </CardHeader>
+   718→                    <CardContent className="space-y-4">
+   719→                      <div className="flex items-center justify-between p-3 rounded-lg border border-border">
+   720→                        <div className="flex items-center gap-3">
+   721→                          {isOffline ? <WifiOff className="w-5 h-5 text-amber-500" /> : <Wifi className="w-5 h-5 text-emerald-500" />}
+   722→                          <div>
+   723→                            <p className="text-sm font-medium">Mode</p>
+   724→                            <p className="text-xs text-muted-foreground">
+   725→                              {isOffline ? 'Offline — changes sync when online' : 'Online — real-time sync active'}
+   726→                            </p>
+   727→                          </div>
+   728→                        </div>
+   729→                        <Switch checked={!isOffline} onCheckedChange={(checked) => setOffline(!checked)} />
+   730→                      </div>
+   731→                      <Separator />
+   732→                      <div className="space-y-2">
+   733→                        <Label className="text-xs">Last Sync Time</Label>
+   734→                        <p className="text-sm text-muted-foreground flex items-center gap-1.5">
+   735→                          <Clock className="w-3.5 h-3.5" />
+   736→                          {lastSyncTime ? new Date(lastSyncTime).toLocaleString() : 'Never'}
+   737→                        </p>
+   738→                      </div>
+   739→                      <div className="space-y-2">
+   740→                        <Label htmlFor="sync-interval" className="text-xs">Sync Interval</Label>
+   741→                        <Select value={syncInterval} onValueChange={setSyncInterval}>
+   742→                          <SelectTrigger className="w-full sm:w-[200px] h-9 sm:h-8 text-xs">
+   743→                            <SelectValue />
+   744→                          </SelectTrigger>
+   745→                          <SelectContent>
+   746→                            <SelectItem value="1">Every 1 minute</SelectItem>
+   747→                            <SelectItem value="5">Every 5 minutes</SelectItem>
+   748→                            <SelectItem value="15">Every 15 minutes</SelectItem>
+   749→                            <SelectItem value="30">Every 30 minutes</SelectItem>
+   750→                            <SelectItem value="60">Every 60 minutes</SelectItem>
+   751→                          </SelectContent>
+   752→                        </Select>
+   753→                      </div>
+   754→                    </CardContent>
+   755→                    <CardFooter className="pt-2">
+   756→                      <Button size="sm" className="h-8 text-xs gap-1.5" onClick={() => handleSave('Connectivity')}>
+   757→                        <Save className="w-3.5 h-3.5" />
+   758→                        Save Changes
+   759→                      </Button>
+   760→                    </CardFooter>
+   761→                  </Card>
+   762→                </TabsContent>
+   763→              </motion.div>
+   764→            )}
+   765→
+   766→            {activeTab === 'planning' && (
+   767→              <motion.div key="planning" variants={tabContentVariants} initial="hidden" animate="visible" exit="exit">
+   768→                <TabsContent value="planning" className="mt-0">
+   769→                  <Card>
+   770→                    <CardHeader>
+   771→                      <CardTitle className="text-sm">Planning Parameters</CardTitle>
+   772→                      <CardDescription className="text-xs">Default settings for block plan optimization</CardDescription>
+   773→                    </CardHeader>
+   774→                    <CardContent className="space-y-4">
+   775→                      <div className="space-y-2">
+   776→                        <Label htmlFor="planning-horizon" className="text-xs">Default Planning Horizon</Label>
+   777→                        <Select value={planningHorizon} onValueChange={setPlanningHorizon}>
+   778→                          <SelectTrigger className="w-full sm:w-[200px] h-9 sm:h-8 text-xs">
+   779→                            <SelectValue />
+   780→                          </SelectTrigger>
+   781→                          <SelectContent>
+   782→                            <SelectItem value="7">7 days (Weekly)</SelectItem>
+   783→                            <SelectItem value="14">14 days</SelectItem>
+   784→                            <SelectItem value="30">30 days (Monthly)</SelectItem>
+   785→                            <SelectItem value="90">90 days (Quarterly)</SelectItem>
+   786→                          </SelectContent>
+   787→                        </Select>
+   788→                      </div>
+   789→                      <div className="space-y-2">
+   790→                        <Label htmlFor="optimization-mode" className="text-xs">Optimization Mode</Label>
+   791→                        <Select value={optimizationMode} onValueChange={setOptimizationMode}>
+   792→                          <SelectTrigger className="w-full sm:w-[200px] h-9 sm:h-8 text-xs">
+   793→                            <SelectValue />
+   794→                          </SelectTrigger>
+   795→                          <SelectContent>
+   796→                            <SelectItem value="aggressive">Aggressive — Maximize block utilization</SelectItem>
+   797→                            <SelectItem value="balanced">Balanced — Equal weight to all factors</SelectItem>
+   798→                            <SelectItem value="conservative">Conservative — Prioritize safety margins</SelectItem>
+   799→                          </SelectContent>
+   800→                          <p className="text-[10px] text-muted-foreground mt-1.5">
+   801→                            {optimizationMode === 'aggressive' && 'Tries to pack maximum maintenance into available windows. May increase conflicts.'}
+   802→                            {optimizationMode === 'balanced' && 'Balances utilization, safety, and train disruption equally.'}
+   803→                            {optimizationMode === 'conservative' && 'Ensures large safety buffers. May reduce total blocks scheduled.'}
+   804→                          </p>
+   805→                        </Select>
+   806→                      </div>
+   807→                      <div className="space-y-2">
+   808→                        <Label htmlFor="conflict-threshold" className="text-xs">Conflict Alert Threshold</Label>
+   809→                        <Select value={conflictThreshold} onValueChange={setConflictThreshold}>
+   810→                          <SelectTrigger className="w-full sm:w-[200px] h-9 sm:h-8 text-xs">
+   811→                            <SelectValue />
+   812→                          </SelectTrigger>
+   813→                          <SelectContent>
+   814→                            <SelectItem value="low">Low — Alert on all conflicts</SelectItem>
+   815→                            <SelectItem value="medium">Medium — Alert on warning and critical</SelectItem>
+   816→                            <SelectItem value="high">High — Alert on critical only</SelectItem>
+   817→                          </SelectContent>
+   818→                        </Select>
+   819→                      </div>
+   820→
+   821→                      <Separator />
+   822→
+   823→                      {/* New Planning Settings */}
+   824→                      <div className="space-y-2">
+   825→                        <Label htmlFor="default-block-duration" className="text-xs">Default Block Duration</Label>
+   826→                        <Select value={defaultBlockDuration} onValueChange={setDefaultBlockDuration}>
+   827→                          <SelectTrigger className="w-full sm:w-[200px] h-9 sm:h-8 text-xs">
+   828→                            <SelectValue />
+   829→                          </SelectTrigger>
+   830→                          <SelectContent>
+   831→                            <SelectItem value="2">2 hours</SelectItem>
+   832→                            <SelectItem value="3">3 hours</SelectItem>
+   833→                            <SelectItem value="4">4 hours</SelectItem>
+   834→                            <SelectItem value="6">6 hours</SelectItem>
+   835→                            <SelectItem value="8">8 hours</SelectItem>
+   836→                          </SelectContent>
+   837→                        </Select>
+   838→                        <p className="text-[10px] text-muted-foreground">Default duration assigned to new maintenance blocks</p>
+   839→                      </div>
+   840→
+   841→                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+   842→                        <div className="space-y-2">
+   843→                          <Label htmlFor="night-block-start" className="text-xs">Night Block Start Time</Label>
+   844→                          <Input
+   845→                            id="night-block-start"
+   846→                            type="time"
+   847→                            value={nightBlockStart}
+   848→                            onChange={(e) => setNightBlockStart(e.target.value)}
+   849→                            className="h-9 sm:h-8 text-sm w-full sm:w-[160px]"
+   850→                          />
+   851→                        </div>
+   852→                        <div className="space-y-2">
+   853→                          <Label htmlFor="night-block-end" className="text-xs">Night Block End Time</Label>
+   854→                          <Input
+   855→                            id="night-block-end"
+   856→                            type="time"
+   857→                            value={nightBlockEnd}
+   858→                            onChange={(e) => setNightBlockEnd(e.target.value)}
+   859→                            className="h-9 sm:h-8 text-sm w-full sm:w-[160px]"
+   860→                          />
+   861→                        </div>
+   862→                      </div>
+   863→                      <p className="text-[10px] text-muted-foreground">Preferred window for scheduling maintenance blocks with lower traffic impact</p>
+   864→
+   865→                      <div className="space-y-2">
+   866→                        <Label htmlFor="min-buffer-time" className="text-xs">Minimum Buffer Time (minutes)</Label>
+   867→                        <Select value={minBufferTime} onValueChange={setMinBufferTime}>
+   868→                          <SelectTrigger className="w-full sm:w-[200px] h-9 sm:h-8 text-xs">
+   869→                            <SelectValue />
+   870→                          </SelectTrigger>
+   871→                          <SelectContent>
+   872→                            <SelectItem value="15">15 minutes</SelectItem>
+   873→                            <SelectItem value="30">30 minutes</SelectItem>
+   874→                            <SelectItem value="45">45 minutes</SelectItem>
+   875→                            <SelectItem value="60">60 minutes</SelectItem>
+   876→                            <SelectItem value="90">90 minutes</SelectItem>
+   877→                          </SelectContent>
+   878→                        </Select>
+   879→                        <p className="text-[10px] text-muted-foreground">Minimum gap between a block and the nearest scheduled train</p>
+   880→                      </div>
+   881→
+   882→                      <Separator />
+   883→                      <div className="space-y-2">
+   884→                        <Label className="text-xs">Constraint Rules</Label>
+   885→                        <div className="space-y-2">
+   886→                          {[
+   887→                            { label: 'Min buffer between block and train', value: `${minBufferTime} min` },
+   888→                            { label: 'Maximum block duration', value: `${defaultBlockDuration} hours` },
+   889→                            { label: 'Combined block for same section', value: 'Auto' },
+   890→                            { label: 'Overlap detection', value: 'Strict' },
+   891→                            { label: `Night block preference (${nightBlockStart}-${nightBlockEnd})`, value: 'Enabled' },
+   892→                          ].map((rule, idx) => (
+   893→                            <div key={idx} className="flex items-center justify-between p-2 rounded-md border border-border/50 gap-2">
+   894→                              <span className="text-xs text-foreground/80 truncate">{rule.label}</span>
+   895→                              <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 bg-muted/50 shrink-0">
+   896→                                {rule.value}
+   897→                              </Badge>
+   898→                            </div>
+   899→                          ))}
+   900→                        </div>
+   901→                      </div>
+   902→                    </CardContent>
+   903→                    <CardFooter className="pt-2">
+   904→                      <Button size="sm" className="h-8 text-xs gap-1.5" onClick={() => handleSave('Planning')}>
+   905→                        <Save className="w-3.5 h-3.5" />
+   906→                        Save Changes
+   907→                      </Button>
+   908→                    </CardFooter>
+   909→                  </Card>
+   910→                </TabsContent>
+   911→              </motion.div>
+   912→            )}
+   913→
+   914→            {activeTab === 'theme' && (
+   915→              <motion.div key="theme" variants={tabContentVariants} initial="hidden" animate="visible" exit="exit">
+   916→                <TabsContent value="theme" className="mt-0">
+   917→                  <Card>
+   918→                    <CardHeader>
+   919→                      <CardTitle className="text-sm">Theme & Appearance</CardTitle>
+   920→                      <CardDescription className="text-xs">Customize the look and feel</CardDescription>
+   921→                    </CardHeader>
+   922→                    <CardContent className="space-y-5">
+   923→                      <div className="space-y-2">
+   924→                        <Label className="text-xs">Mode</Label>
+   925→                        <div className="grid grid-cols-3 gap-2 max-w-sm">
+   926→                          {([
+   927→                            { value: 'light', icon: Sun, label: 'Light' },
+   928→                            { value: 'dark', icon: Moon, label: 'Dark' },
+   929→                            { value: 'system', icon: Monitor, label: 'System' },
+   930→                          ] as const).map(({ value, icon: Icon, label }) => (
+   931→                            <button
+   932→                              key={value}
+   933→                              onClick={() => setTheme(value)}
+   934→                              className={`flex flex-col items-center gap-1.5 p-3 rounded-lg border-2 transition-colors min-h-[44px] ${
+   935→                                theme === value ? 'border-primary bg-primary/5' : 'border-border hover:border-border'
+   936→                              }`}
+   937→                            >
+   938→                              <Icon className="w-5 h-5" />
+   939→                              <span className="text-xs font-medium">{label}</span>
+   940→                              {theme === value && <Check className="w-3 h-3 text-primary" />}
+   941→                            </button>
+   942→                          ))}
+   943→                        </div>
+   944→                      </div>
+   945→                      <Separator />
+   946→                      <div className="space-y-2">
+   947→                        <Label className="text-xs">Accent Color</Label>
+   948→                        <div className="flex items-center gap-2 flex-wrap">
+   949→                          {ACCENT_COLORS.map((color) => (
+   950→                            <button
+   951→                              key={color.value}
+   952→                              onClick={() => setAccentColor(color.value)}
+   953→                              className={`flex items-center justify-center w-10 h-10 min-h-[44px] min-w-[44px] rounded-full ${color.color} transition-all ${
+   954→                                accentColor === color.value
+   955→                                  ? 'ring-2 ring-offset-2 ring-muted-foreground scale-110'
+   956→                                  : 'hover:scale-105'
+   957→                              }`}
+   958→                            >
+   959→                              {accentColor === color.value && (
+   960→                                <Check className="h-3.5 w-3.5 text-white" />
+   961→                              )}
+   962→                            </button>
+   963→                          ))}
+   964→                        </div>
+   965→                      </div>
+   966→                    </CardContent>
+   967→                    <CardFooter className="pt-2">
+   968→                      <Button size="sm" className="h-8 text-xs gap-1.5" onClick={() => handleSave('Theme')}>
+   969→                        <Save className="w-3.5 h-3.5" />
+   970→                        Save Changes
+   971→                      </Button>
+   972→                    </CardFooter>
+   973→                  </Card>
+   974→                </TabsContent>
+   975→              </motion.div>
+   976→            )}
+   977→
+   978→            {activeTab === 'about' && (
+   979→              <motion.div key="about" variants={tabContentVariants} initial="hidden" animate="visible" exit="exit">
+   980→                <TabsContent value="about" className="mt-0">
+   981→                  <Card>
+   982→                    <CardHeader>
+   983→                      <CardTitle className="text-sm">About RailOpt AI</CardTitle>
+   984→                      <CardDescription className="text-xs">System information and version details</CardDescription>
+   985→                    </CardHeader>
+   986→                    <CardContent className="space-y-5">
+   987→                      {/* Version info */}
+   988→                      <div className="flex items-center gap-4 p-4 rounded-lg bg-muted/30 border border-border">
+   989→                        <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-primary/10 shrink-0">
+   990→                          <Settings className="w-6 h-6 text-primary" />
+   991→                        </div>
+   992→                        <div>
+   993→                          <h3 className="text-sm font-semibold text-foreground">RailOpt AI</h3>
+   994→                          <p className="text-xs text-muted-foreground">AI-Powered Railway Maintenance Block Optimizer</p>
+   995→                        </div>
+   996→                      </div>
+   997→
+   998→                      <div className="space-y-3">
+   999→                        {[
+  1000→                          { icon: Info, label: 'Version', value: '1.0.0 (MVP)' },
+  1001→                          { icon: Calendar, label: 'Build Date', value: '2025-01-27' },
+  1002→                          { icon: Shield, label: 'License', value: 'Indian Railways — Internal Use Only' },
+  1003→                          { icon: Code2, label: 'Tech Stack', value: 'Next.js 16 · TypeScript · Tailwind CSS · Prisma' },
+  1004→                          { icon: FileText, label: 'UI Framework', value: 'shadcn/ui · Radix · Framer Motion' },
+  1005→                          { icon: Building2, label: 'Database', value: 'SQLite (via Prisma ORM)' },
+  1006→                        ].map(({ icon: Icon, label, value }, idx) => (
+  1007→                          <div key={idx} className="flex items-start gap-3 p-3 rounded-lg border border-border/50">
+  1008→                            <Icon className="w-4 h-4 text-muted-foreground mt-0.5 shrink-0" />
+  1009→                            <div className="min-w-0">
+  1010→                              <p className="text-[10px] text-muted-foreground uppercase tracking-wider">{label}</p>
+  1011→                              <p className="text-xs text-foreground mt-0.5">{value}</p>
+  1012→                            </div>
+  1013→                          </div>
+  1014→                        ))}
+  1015→                      </div>
+  1016→
+  1017→                      <Separator />
+  1018→
+  1019→                      <div className="p-3 rounded-lg border border-border/50">
+  1020→                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Description</p>
+  1021→                        <p className="text-xs text-foreground/80 leading-relaxed">
+  1022→                          RailOpt AI is an intelligent maintenance block planning system for Indian Railways. 
+  1023→                          It uses AI-driven optimization to recommend maintenance block schedules, detect conflicts 
+  1024→                          with train timetables, and support multi-department coordination for safe and efficient 
+  1025→                          railway operations.
+  1026→                        </p>
+  1027→                      </div>
+  1028→                    </CardContent>
+  1029→                  </Card>
+  1030→                </TabsContent>
+  1031→              </motion.div>
+  1032→            )}
+  1033→          </AnimatePresence>
+  1034→        </Tabs>
+  1035→      </div>
+  1036→    </div>
+  1037→  )
+  1038→}
+  1039→

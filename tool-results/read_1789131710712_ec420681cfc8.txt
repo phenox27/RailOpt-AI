@@ -1,0 +1,689 @@
+     1→'use client'
+     2→
+     3→import { useState, useEffect } from 'react'
+     4→import { KpiCard } from './kpi-card'
+     5→import { DepartmentChart } from './department-chart'
+     6→import { CorridorChart } from './corridor-chart'
+     7→import { ActivityFeed } from './activity-feed'
+     8→import { ConflictsSummary } from './conflicts-summary'
+     9→import { PlanStatus } from './plan-status'
+    10→import { CorridorHeatmap } from './corridor-heatmap'
+    11→import { BlockUtilizationChart } from './block-utilization-chart'
+    12→import { RailwayNetworkMap } from './railway-network-map'
+    13→import { CorridorPerformanceChart } from './corridor-performance-chart'
+    14→import { ResourceAllocationWidget } from './resource-allocation-widget'
+    15→import { DepartmentWorkloadChart } from './department-workload-chart'
+    16→import { ActivityTicker } from './activity-ticker'
+    17→import { WeatherAlert } from './weather-alert'
+    18→import { SectionComparisonChart } from './section-comparison-chart'
+    19→import { CorridorHealthRing } from './corridor-health-ring'
+    20→import { kpiData } from '@/data/simulated-data'
+    21→import { useAppStore } from '@/store/app-store'
+    22→import { Card, CardContent } from '@/components/ui/card'
+    23→import { Badge } from '@/components/ui/badge'
+    24→import { Button } from '@/components/ui/button'
+    25→import { Progress } from '@/components/ui/progress'
+    26→import { Separator } from '@/components/ui/separator'
+    27→import {
+    28→  ClipboardList,
+    29→  Clock,
+    30→  AlertOctagon,
+    31→  Blocks,
+    32→  AlertTriangle,
+    33→  Activity,
+    34→  Gauge,
+    35→  TrainFront,
+    36→  Sparkles,
+    37→  ShieldCheck,
+    38→  Plus,
+    39→  Wifi,
+    40→  WifiOff,
+    41→  Cpu,
+    42→  CheckCircle2,
+    43→  RefreshCw,
+    44→  LayoutDashboard,
+    45→  BarChart3,
+    46→  Zap,
+    47→  ChevronDown,
+    48→  ChevronUp,
+    49→  MapPin,
+    50→  Route,
+    51→  Layers,
+    52→  Network,
+    53→  Server,
+    54→  TrendingUp,
+    55→  Users,
+    56→  Package,
+    57→  Target,
+    58→  Info,
+    59→} from 'lucide-react'
+    60→import { format } from 'date-fns'
+    61→import { motion, AnimatePresence } from 'framer-motion'
+    62→import { useIsMobile } from '@/hooks/use-mobile'
+    63→import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
+    64→
+    65→const ROLE_LABELS: Record<string, string> = {
+    66→  admin: 'Administrator',
+    67→  planner: 'Block Planner',
+    68→  control_office: 'Control Office',
+    69→  engineering: 'Engineering Dept',
+    70→  snt: 'Signal & Telecom',
+    71→  traction: 'Traction Dept',
+    72→}
+    73→
+    74→const kpiCards = [
+    75→  { icon: ClipboardList, label: 'Total Requests', value: kpiData.totalRequests, status: 'info' as const },
+    76→  { icon: Clock, label: 'Pending Score', value: kpiData.pendingRequests, trend: 'up' as const, trendValue: '+2', status: 'warning' as const },
+    77→  { icon: AlertOctagon, label: 'Overdue Items', value: kpiData.overdueRequests, trend: 'down' as const, trendValue: '-1', status: 'danger' as const },
+    78→  { icon: Blocks, label: 'Active Blocks', value: kpiData.totalBlocks, status: 'default' as const },
+    79→  { icon: AlertTriangle, label: 'Critical Conflicts', value: kpiData.criticalConflicts, status: 'danger' as const },
+    80→  { icon: Activity, label: 'Asset Availability', value: kpiData.assetAvailability, unit: '%', status: 'success' as const },
+    81→  { icon: Gauge, label: 'Block Utilization', value: kpiData.blockUtilization, unit: '%', status: 'default' as const },
+    82→  { icon: TrainFront, label: 'Train Disruption', value: kpiData.trainDisruption, unit: 'trains', status: 'warning' as const },
+    83→]
+    84→
+    85→export function DashboardView() {
+    86→  const { currentRole, setActiveView } = useAppStore()
+    87→  const [currentTime, setCurrentTime] = useState(new Date())
+    88→  const [activityExpanded, setActivityExpanded] = useState(false)
+    89→  const [railwayStatsExpanded, setRailwayStatsExpanded] = useState(false)
+    90→  const isMobile = useIsMobile()
+    91→
+    92→  useEffect(() => {
+    93→    const timer = setInterval(() => setCurrentTime(new Date()), 1000)
+    94→    return () => clearInterval(timer)
+    95→  }, [])
+    96→
+    97→  const greeting = (() => {
+    98→    const h = currentTime.getHours()
+    99→    if (h < 12) return 'Good Morning'
+   100→    if (h < 17) return 'Good Afternoon'
+   101→    return 'Good Evening'
+   102→  })()
+   103→
+   104→  // Typing effect state
+   105→  const [typedGreeting, setTypedGreeting] = useState('')
+   106→  const [isTypingDone, setIsTypingDone] = useState(false)
+   107→
+   108→  useEffect(() => {
+   109→    const fullText = `${greeting}, Rajesh`
+   110→    let index = 0
+   111→    setTypedGreeting('')
+   112→    setIsTypingDone(false)
+   113→    const interval = setInterval(() => {
+   114→      if (index < fullText.length) {
+   115→        setTypedGreeting(fullText.slice(0, index + 1))
+   116→        index++
+   117→      } else {
+   118→        setIsTypingDone(true)
+   119→        clearInterval(interval)
+   120→      }
+   121→    }, 60)
+   122→    return () => clearInterval(interval)
+   123→  }, [greeting])
+   124→
+   125→  // Today's Focus items
+   126→  const focusItems = [
+   127→    { text: '2 critical conflicts need resolution', color: 'bg-red-500' },
+   128→    { text: '5 blocks awaiting approval', color: 'bg-amber-500' },
+   129→    { text: '3 overdue maintenance requests', color: 'bg-orange-500' },
+   130→  ]
+   131→
+   132→  return (
+   133→    <div className="flex flex-col gap-4 sm:gap-6 p-3 sm:p-4 md:p-6 max-w-[1400px] mx-auto dot-grid relative">
+   134→      {/* Gradient mesh background behind the welcome section */}
+   135→      <div
+   136→        className="absolute inset-0 pointer-events-none -z-10 opacity-30"
+   137→        style={{
+   138→          background: 'radial-gradient(ellipse 80% 50% at 20% 10%, color-mix(in srgb, var(--info) 15%, transparent), transparent), radial-gradient(ellipse 60% 40% at 80% 20%, color-mix(in srgb, var(--primary) 10%, transparent), transparent), radial-gradient(ellipse 50% 50% at 50% 50%, color-mix(in srgb, var(--info) 8%, transparent), transparent)',
+   139→          backgroundSize: '200% 200%',
+   140→          animation: 'gradient-mesh 12s ease-in-out infinite',
+   141→        }}
+   142→      />
+   143→      {/* Live Activity Ticker - Full width */}
+   144→      <ActivityTicker />
+   145→
+   146→      {/* Simulated Data Transparency Badge */}
+   147→      <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/40 text-amber-700 dark:text-amber-400 w-fit" role="status" aria-label="Data source indicator">
+   148→        <Info className="w-3 h-3 shrink-0" />
+   149→        <span className="text-[11px] font-medium">Simulated Data — Prototype</span>
+   150→      </div>
+   151→
+   152→      {/* Welcome Section - Enhanced with gradient background and decorative icon */}
+   153→      <motion.div
+   154→        initial={{ opacity: 0, y: 8 }}
+   155→        animate={{ opacity: 1, y: 0 }}
+   156→        transition={{ duration: 0.2 }}
+   157→        className="rounded-xl bg-card border border-border/30 bg-gradient-to-r from-[#1a237e]/5 via-background to-[#FF9933]/5 p-4 sm:p-6"
+   158→      >
+   159→        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+   160→          <div className="flex items-start gap-3">
+   161→            {/* Decorative railway icon with subtle animation */}
+   162→            <motion.div
+   163→              initial={{ scale: 0.8, opacity: 0 }}
+   164→              animate={{ scale: 1, opacity: 1 }}
+   165→              transition={{ duration: 0.4, delay: 0.1 }}
+   166→              className="flex h-10 w-10 sm:h-12 sm:w-12 items-center justify-center rounded-xl bg-gradient-to-br from-[#FF9933]/20 to-[#1a237e]/20 shrink-0"
+   167→            >
+   168→              <TrainFront className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
+   169→            </motion.div>
+   170→            <div>
+   171→              <h1 className="text-xl sm:text-2xl font-semibold tracking-tight">
+   172→                <AnimatePresence mode="wait">
+   173→                  <motion.span
+   174→                    key={typedGreeting}
+   175→                    className="inline"
+   176→                  >
+   177→                    {typedGreeting.split('').map((char, i) => (
+   178→                      <motion.span
+   179→                        key={i}
+   180→                        initial={{ opacity: 0, y: 4 }}
+   181→                        animate={{ opacity: 1, y: 0 }}
+   182→                        transition={{ duration: 0.15, delay: i * 0.01 }}
+   183→                        className={char === ' ' ? 'inline' : 'inline-block'}
+   184→                      >
+   185→                        {char === ' ' ? '\u00A0' : char}
+   186→                      </motion.span>
+   187→                    ))}
+   188→                  </motion.span>
+   189→                </AnimatePresence>
+   190→                {isTypingDone && (
+   191→                  <motion.span
+   192→                    initial={{ opacity: 0 }}
+   193→                    animate={{ opacity: 1 }}
+   194→                    className="inline-block ml-0.5"
+   195→                  >|</motion.span>
+   196→                )}
+   197→              </h1>
+   198→              <p className="text-sm text-muted-foreground mt-0.5 flex items-center gap-2 flex-wrap">
+   199→                <Clock className="h-3.5 w-3.5" />
+   200→                <span className="hidden sm:inline">{format(currentTime, 'EEEE, MMMM d, yyyy · HH:mm')}</span>
+   201→                <span className="sm:hidden">{format(currentTime, 'EEE, MMM d · HH:mm')}</span>
+   202→                <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-5 font-normal">
+   203→                  {ROLE_LABELS[currentRole]}
+   204→                </Badge>
+   205→              </p>
+   206→              {/* Today's Focus — staggered pills */}
+   207→              {isTypingDone && (
+   208→                <motion.div
+   209→                  initial={{ opacity: 0 }}
+   210→                  animate={{ opacity: 1 }}
+   211→                  transition={{ duration: 0.3 }}
+   212→                  className="flex flex-wrap items-center gap-2 mt-2"
+   213→                >
+   214→                  <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mr-1">Today&apos;s Focus</span>
+   215→                  {focusItems.map((item, index) => (
+   216→                    <motion.div
+   217→                      key={item.text}
+   218→                      initial={{ opacity: 0, x: -8, scale: 0.9 }}
+   219→                      animate={{ opacity: 1, x: 0, scale: 1 }}
+   220→                      transition={{ duration: 0.25, delay: index * 0.1 }}
+   221→                      className="inline-flex items-center gap-1.5 rounded-full bg-muted/60 border border-border/50 px-2.5 py-0.5 text-[11px] font-medium text-foreground/80 transition-transform duration-150 hover:scale-105 cursor-default"
+   222→                    >
+   223→                      <span className={`inline-block h-1.5 w-1.5 rounded-full ${item.color} shrink-0`} />
+   224→                      {item.text}
+   225→                    </motion.div>
+   226→                  ))}
+   227→                </motion.div>
+   228→              )}
+   229→            </div>
+   230→          </div>
+   231→          {/* Quick Actions - Enhanced with border and background */}
+   232→          <div className="flex items-center gap-2 flex-wrap rounded-xl p-1.5">
+   233→            <Tooltip>
+   234→              <TooltipTrigger asChild>
+   235→                <Button
+   236→                  size="sm"
+   237→                  className="bg-[#283593] hover:bg-[#0d47a1] text-white text-xs h-10 min-h-[44px] sm:h-9 px-4 gap-1.5 font-medium shadow-sm rounded-full"
+   238→                  onClick={() => setActiveView('planning')}
+   239→                >
+   240→                  <Sparkles className="h-4 w-4" />
+   241→                  Run Optimization
+   242→                </Button>
+   243→              </TooltipTrigger>
+   244→              <TooltipContent side="bottom">AI-powered block optimization engine</TooltipContent>
+   245→            </Tooltip>
+   246→            <Tooltip>
+   247→              <TooltipTrigger asChild>
+   248→                <Button
+   249→                  variant="outline"
+   250→                  size="sm"
+   251→                  className="text-xs h-10 min-h-[44px] sm:h-9 px-3 gap-1.5 font-medium rounded-full bg-muted/30 border border-border/50"
+   252→                >
+   253→                  <AlertTriangle className="h-4 w-4" />
+   254→                  <span className="hidden xs:inline">View </span>Conflicts
+   255→                </Button>
+   256→              </TooltipTrigger>
+   257→              <TooltipContent side="bottom">View timetable conflicts & resolutions</TooltipContent>
+   258→            </Tooltip>
+   259→            <Tooltip>
+   260→              <TooltipTrigger asChild>
+   261→                <Button
+   262→                  variant="outline"
+   263→                  size="sm"
+   264→                  className="text-xs h-10 min-h-[44px] sm:h-9 px-3 gap-1.5 font-medium rounded-full bg-muted/30 border border-border/50"
+   265→                  onClick={() => setActiveView('maintenance')}
+   266→                >
+   267→                  <Plus className="h-4 w-4" />
+   268→                  Create Request
+   269→                </Button>
+   270→              </TooltipTrigger>
+   271→              <TooltipContent side="bottom">Create a new maintenance request</TooltipContent>
+   272→            </Tooltip>
+   273→          </div>
+   274→        </div>
+   275→      </motion.div>
+   276→
+   277→      <Separator />
+   278→
+   279→      {/* KPI Strip - Staggered animation per card with border glow */}
+   280→      <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-2 sm:gap-3 border-glow rounded-lg p-1">
+   281→        {kpiCards.map((kpi, index) => (
+   282→          <motion.div
+   283→            key={kpi.label}
+   284→            initial={{ opacity: 0, y: 12 }}
+   285→            animate={{ opacity: 1, y: 0 }}
+   286→            transition={{ duration: 0.2, delay: 0.05 + index * 0.05 }}
+   287→          >
+   288→            <KpiCard
+   289→              icon={kpi.icon}
+   290→              label={kpi.label}
+   291→              value={kpi.value}
+   292→              unit={kpi.unit}
+   293→              trend={kpi.trend}
+   294→              trendValue={kpi.trendValue}
+   295→              status={kpi.status}
+   296→            />
+   297→          </motion.div>
+   298→        ))}
+   299→      </div>
+   300→
+   301→      <Separator />
+   302→
+   303→      {/* Charts Row + Workload + System Status + Weather */}
+   304→      <div className="grid grid-cols-1 md:grid-cols-5 gap-3 sm:gap-4">
+   305→        <motion.div
+   306→          initial={{ opacity: 0, y: 12 }}
+   307→          animate={{ opacity: 1, y: 0 }}
+   308→          transition={{ duration: 0.2, delay: 0.1 }}
+   309→          className="md:col-span-1"
+   310→        >
+   311→          <div className="flex items-center gap-2 mb-3 border-l-2 border-primary/40 pl-2">
+   312→            <BarChart3 className="h-4 w-4 text-primary/70" />
+   313→            <h2 className="text-sm font-semibold heading-gradient-underline">Department Distribution</h2>
+   314→          </div>
+   315→          <DepartmentChart />
+   316→        </motion.div>
+   317→        <motion.div
+   318→          initial={{ opacity: 0, y: 12 }}
+   319→          animate={{ opacity: 1, y: 0 }}
+   320→          transition={{ duration: 0.2, delay: 0.15 }}
+   321→          className="md:col-span-1"
+   322→        >
+   323→          <div className="flex items-center gap-2 mb-3 border-l-2 border-primary/40 pl-2">
+   324→            <Route className="h-4 w-4 text-primary/70" />
+   325→            <h2 className="text-sm font-semibold heading-gradient-underline">Corridor Analysis</h2>
+   326→          </div>
+   327→          <CorridorChart />
+   328→        </motion.div>
+   329→        <motion.div
+   330→          initial={{ opacity: 0, y: 12 }}
+   331→          animate={{ opacity: 1, y: 0 }}
+   332→          transition={{ duration: 0.2, delay: 0.175 }}
+   333→          className="md:col-span-1"
+   334→        >
+   335→          <div className="flex items-center gap-2 mb-3 border-l-2 border-[#1a237e]/40 pl-2">
+   336→            <Users className="h-4 w-4 text-[#283593] dark:text-[#3f51b5]" />
+   337→            <h2 className="text-sm font-semibold heading-gradient-underline">Department Workload</h2>
+   338→          </div>
+   339→          <DepartmentWorkloadChart />
+   340→        </motion.div>
+   341→        {/* System Status - Enhanced with pulsing dot and progress bar */}
+   342→        <motion.div
+   343→          initial={{ opacity: 0, y: 12 }}
+   344→          animate={{ opacity: 1, y: 0 }}
+   345→          transition={{ duration: 0.2, delay: 0.2 }}
+   346→        >
+   347→          <Card className="h-full">
+   348→            <CardContent className="p-4 space-y-3">
+   349→              {/* Section heading with icon and border accent */}
+   350→              <div className="flex items-center gap-2 border-l-2 border-primary/40 pl-2">
+   351→                <Zap className="h-4 w-4 text-primary" />
+   352→                <h3 className="text-sm font-semibold">System Status</h3>
+   353→              </div>
+   354→
+   355→              {/* Connectivity with pulsing green dot */}
+   356→              <div className="flex items-center justify-between">
+   357→                <span className="text-xs text-muted-foreground font-medium">Connectivity</span>
+   358→                <div className="flex items-center gap-2">
+   359→                  <span className="relative flex h-2 w-2">
+   360→                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+   361→                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+   362→                  </span>
+   363→                  <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 text-[10px] px-2 dark:bg-emerald-950/30 dark:text-emerald-400 dark:border-emerald-800">
+   364→                    {/* R8-1: Mini heartbeat SVG next to Online status */}
+   365→                    <svg width="14" height="10" viewBox="0 0 14 10" className="mr-1 inline-block heartbeat-line" fill="none">
+   366→                      <polyline points="0,5 2,5 3,2 4,8 5,1 6,9 7,3 8,5 9,5 10,5 11,5 12,5 14,5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+   367→                    </svg>
+   368→                    Online
+   369→                  </Badge>
+   370→                </div>
+   371→              </div>
+   372→
+   373→              {/* Last Sync */}
+   374→              <div className="flex items-center justify-between">
+   375→                <span className="text-xs text-muted-foreground font-medium">Last Sync</span>
+   376→                <span className="text-xs font-medium tabular-nums">{format(new Date(), 'HH:mm:ss')}</span>
+   377→              </div>
+   378→
+   379→              {/* AI Engine with progress bar */}
+   380→              <div className="space-y-1.5">
+   381→                <div className="flex items-center justify-between">
+   382→                  <span className="text-xs text-muted-foreground font-medium">AI Engine</span>
+   383→                  <Badge variant="outline" className="bg-[#e8eaf6] text-[#0d47a1] border-[#9fa8da] text-[10px] px-2 dark:bg-[#0d1442]/30 dark:text-[#3f51b5] dark:border-[#1a237e]">
+   384→                    <Cpu className="h-2.5 w-2.5 mr-1" />
+   385→                    Active
+   386→                  </Badge>
+   387→                </div>
+   388→                <div className="flex items-center gap-2">
+   389→                  <span className="text-[10px] text-muted-foreground">Utilization</span>
+   390→                  <Progress value={68} className="h-1.5 flex-1" />
+   391→                  <span className="text-[10px] font-medium tabular-nums">68%</span>
+   392→                </div>
+   393→              </div>
+   394→
+   395→              {/* Optimization Status */}
+   396→              <div className="flex items-center justify-between">
+   397→                <span className="text-xs text-muted-foreground font-medium">Optimization</span>
+   398→                <span className="text-xs text-muted-foreground">Idle</span>
+   399→              </div>
+   400→
+   401→              {/* Uptime */}
+   402→              <div className="flex items-center justify-between">
+   403→                <span className="text-xs text-muted-foreground font-medium">Uptime</span>
+   404→                <div className="flex items-center gap-1.5">
+   405→                  <CheckCircle2 className="h-3 w-3 text-emerald-500" />
+   406→                  <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">99.8%</span>
+   407→                </div>
+   408→              </div>
+   409→
+   410→              <Button variant="ghost" size="sm" className="w-full text-xs h-9 min-h-[44px] sm:h-7 gap-1.5 mt-1">
+   411→                <RefreshCw className="h-3 w-3" />
+   412→                Refresh Status
+   413→              </Button>
+   414→            </CardContent>
+   415→          </Card>
+   416→        </motion.div>
+   417→
+   418→        {/* Weather Alert Widget */}
+   419→        <motion.div
+   420→          initial={{ opacity: 0, y: 12 }}
+   421→          animate={{ opacity: 1, y: 0 }}
+   422→          transition={{ duration: 0.2, delay: 0.22 }}
+   423→        >
+   424→          <WeatherAlert />
+   425→        </motion.div>
+   426→      </div>
+   427→
+   428→      <Separator />
+   429→
+   430→      {/* Activity & Conflicts Row */}
+   431→      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
+   432→        <motion.div
+   433→          initial={{ opacity: 0, y: 12 }}
+   434→          animate={{ opacity: 1, y: 0 }}
+   435→          transition={{ duration: 0.2, delay: 0.25 }}
+   436→        >
+   437→          <div className="flex items-center justify-between mb-3">
+   438→            <div className="flex items-center gap-2 border-l-2 border-primary/40 pl-2">
+   439→              <Activity className="h-4 w-4 text-primary/70" />
+   440→              <h2 className="text-sm font-semibold heading-gradient-underline">Recent Activity</h2>
+   441→            </div>
+   442→            {/* Collapsible toggle on mobile */}
+   443→            {isMobile && (
+   444→              <Button
+   445→                variant="ghost"
+   446→                size="sm"
+   447→                className="h-7 text-xs gap-1"
+   448→                onClick={() => setActivityExpanded(!activityExpanded)}
+   449→              >
+   450→                {activityExpanded ? (
+   451→                  <>Less <ChevronUp className="h-3 w-3" /></>
+   452→                ) : (
+   453→                  <>More <ChevronDown className="h-3 w-3" /></>
+   454→                )}
+   455→              </Button>
+   456→            )}
+   457→          </div>
+   458→          <div className={isMobile && !activityExpanded ? 'max-h-32 overflow-hidden' : ''}>
+   459→            <ActivityFeed />
+   460→          </div>
+   461→          {isMobile && !activityExpanded && (
+   462→            <div className="relative mt-0">
+   463→              <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-background to-transparent pointer-events-none" />
+   464→            </div>
+   465→          )}
+   466→        </motion.div>
+   467→        <motion.div
+   468→          initial={{ opacity: 0, y: 12 }}
+   469→          animate={{ opacity: 1, y: 0 }}
+   470→          transition={{ duration: 0.2, delay: 0.3 }}
+   471→        >
+   472→          <div className="flex items-center gap-2 mb-3 border-l-2 border-destructive/40 pl-2">
+   473→            <AlertTriangle className="h-4 w-4 text-destructive/70" />
+   474→            <h2 className="text-sm font-semibold heading-gradient-underline">Active Conflicts</h2>
+   475→          </div>
+   476→          <ConflictsSummary />
+   477→        </motion.div>
+   478→      </div>
+   479→
+   480→      <Separator />
+   481→
+   482→      {/* Corridor Performance Trends — Full width */}
+   483→      <motion.div
+   484→        initial={{ opacity: 0, y: 12 }}
+   485→        animate={{ opacity: 1, y: 0 }}
+   486→        transition={{ duration: 0.2, delay: 0.33 }}
+   487→      >
+   488→        <div className="flex items-center gap-2 mb-3 border-l-2 border-[#1a237e]/40 pl-2">
+   489→          <TrendingUp className="h-4 w-4 text-[#283593] dark:text-[#3f51b5]" />
+   490→          <h2 className="text-sm font-semibold heading-gradient-underline">Corridor Performance Trends</h2>
+   491→        </div>
+   492→        <CorridorPerformanceChart />
+   493→      </motion.div>
+   494→
+   495→      <Separator />
+   496→
+   497→      {/* Resource Allocation Widget */}
+   498→      <motion.div
+   499→        initial={{ opacity: 0, y: 12 }}
+   500→        animate={{ opacity: 1, y: 0 }}
+   501→        transition={{ duration: 0.2, delay: 0.36 }}
+   502→      >
+   503→        <div className="flex items-center gap-2 mb-3 border-l-2 border-[#1a237e]/40 pl-2">
+   504→          <Package className="h-4 w-4 text-[#283593] dark:text-[#3f51b5]" />
+   505→          <h2 className="text-sm font-semibold heading-gradient-underline">Resource Allocation / संसाधन आवंटन</h2>
+   506→        </div>
+   507→        <ResourceAllocationWidget />
+   508→      </motion.div>
+   509→
+   510→      <Separator />
+   511→
+   512→      {/* Data Visualization Row: Heatmap + Donut + Radar */}
+   513→      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4">
+   514→        <motion.div
+   515→          initial={{ opacity: 0, y: 12 }}
+   516→          animate={{ opacity: 1, y: 0 }}
+   517→          transition={{ duration: 0.2, delay: 0.35 }}
+   518→        >
+   519→          <div className="flex items-center gap-2 mb-3 border-l-2 border-primary/40 pl-2">
+   520→            <MapPin className="h-4 w-4 text-primary/70" />
+   521→            <h2 className="text-sm font-semibold heading-gradient-underline">Corridor Heatmap</h2>
+   522→          </div>
+   523→          <CorridorHeatmap />
+   524→        </motion.div>
+   525→        <motion.div
+   526→          initial={{ opacity: 0, y: 12 }}
+   527→          animate={{ opacity: 1, y: 0 }}
+   528→          transition={{ duration: 0.2, delay: 0.4 }}
+   529→        >
+   530→          <div className="flex items-center gap-2 mb-3 border-l-2 border-primary/40 pl-2">
+   531→            <Gauge className="h-4 w-4 text-primary/70" />
+   532→            <h2 className="text-sm font-semibold heading-gradient-underline">Block Utilization</h2>
+   533→          </div>
+   534→          <BlockUtilizationChart />
+   535→        </motion.div>
+   536→        <motion.div
+   537→          initial={{ opacity: 0, y: 12 }}
+   538→          animate={{ opacity: 1, y: 0 }}
+   539→          transition={{ duration: 0.2, delay: 0.45 }}
+   540→        >
+   541→          <div className="flex items-center gap-2 mb-3 border-l-2 border-[#1a237e] pl-2">
+   542→            <Target className="h-4 w-4 text-[#283593] dark:text-[#3f51b5]" />
+   543→            <h2 className="text-sm font-semibold heading-gradient-underline">Section Comparison / खंड तुलना</h2>
+   544→          </div>
+   545→          <SectionComparisonChart />
+   546→        </motion.div>
+   547→      </div>
+   548→
+   549→      <Separator />
+   550→
+   551→      {/* Railway Network Map + Corridor Health Row */}
+   552→      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4">
+   553→        <motion.div
+   554→          initial={{ opacity: 0, y: 12 }}
+   555→          animate={{ opacity: 1, y: 0 }}
+   556→          transition={{ duration: 0.2, delay: 0.45 }}
+   557→          className="md:col-span-2"
+   558→        >
+   559→          <RailwayNetworkMap />
+   560→        </motion.div>
+   561→        <motion.div
+   562→          initial={{ opacity: 0, y: 12 }}
+   563→          animate={{ opacity: 1, y: 0 }}
+   564→          transition={{ duration: 0.2, delay: 0.5 }}
+   565→        >
+   566→          <CorridorHealthRing />
+   567→        </motion.div>
+   568→      </div>
+   569→
+   570→      <Separator />
+   571→
+   572→      {/* Corridor Chart Row */}
+   573→      <motion.div
+   574→        initial={{ opacity: 0, y: 12 }}
+   575→        animate={{ opacity: 1, y: 0 }}
+   576→        transition={{ duration: 0.2, delay: 0.52 }}
+   577→      >
+   578→        <CorridorChart />
+   579→      </motion.div>
+   580→
+   581→      <Separator />
+   582→
+   583→      {/* Plan Status */}
+   584→      <motion.div
+   585→        initial={{ opacity: 0, y: 12 }}
+   586→        animate={{ opacity: 1, y: 0 }}
+   587→        transition={{ duration: 0.2, delay: 0.55 }}
+   588→      >
+   589→        <div className="flex items-center gap-2 mb-3 border-l-2 border-primary/40 pl-2">
+   590→          <LayoutDashboard className="h-4 w-4 text-primary/70" />
+   591→          <h2 className="text-sm font-semibold heading-gradient-underline">Plan Status</h2>
+   592→        </div>
+   593→        <PlanStatus />
+   594→      </motion.div>
+   595→
+   596→      <Separator />
+   597→
+   598→      {/* Railway Stats Footer Section - Collapsible */}
+   599→      <motion.div
+   600→        initial={{ opacity: 0, y: 12 }}
+   601→        animate={{ opacity: 1, y: 0 }}
+   602→        transition={{ duration: 0.2, delay: 0.5 }}
+   603→      >
+   604→        <Card className="border-border/60">
+   605→          <CardContent className="p-4 sm:p-5">
+   606→            {/* Header with toggle */}
+   607→            <div className="flex items-center justify-between">
+   608→              <div className="flex items-center gap-2 border-l-2 border-[#1a237e]/40 pl-2">
+   609→                <TrainFront className="h-4 w-4 text-[#283593] dark:text-[#3f51b5]" />
+   610→                <h2 className="text-sm font-semibold heading-gradient-underline">Indian Railways Network</h2>
+   611→              </div>
+   612→              <Button
+   613→                variant="ghost"
+   614→                size="sm"
+   615→                className="h-7 text-xs gap-1 text-muted-foreground hover:text-foreground"
+   616→                onClick={() => setRailwayStatsExpanded(!railwayStatsExpanded)}
+   617→              >
+   618→                {railwayStatsExpanded ? (
+   619→                  <>Show Less <ChevronUp className="h-3 w-3" /></>
+   620→                ) : (
+   621→                  <>Show More <ChevronDown className="h-3 w-3" /></>
+   622→                )}
+   623→              </Button>
+   624→            </div>
+   625→
+   626→            {/* Always visible summary line */}
+   627→            <p className="text-xs text-muted-foreground mt-1.5 pl-3.5">
+   628→              One of the world&apos;s largest railway networks — connecting the nation
+   629→            </p>
+   630→
+   631→            {/* Collapsible stats grid */}
+   632→            {railwayStatsExpanded && (
+   633→              <motion.div
+   634→                initial={{ opacity: 0, height: 0 }}
+   635→                animate={{ opacity: 1, height: 'auto' }}
+   636→                transition={{ duration: 0.25 }}
+   637→                className="mt-4"
+   638→              >
+   639→                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+   640→                  {/* Total Route */}
+   641→                  <div className="flex items-start gap-3 rounded-lg bg-muted/50 p-3 border border-border/40">
+   642→                    <div className="flex h-8 w-8 items-center justify-center rounded-md bg-[#1a237e]/10 shrink-0">
+   643→                      <Route className="h-4 w-4 text-[#283593] dark:text-[#3f51b5]" />
+   644→                    </div>
+   645→                    <div>
+   646→                      <div className="text-lg font-bold tracking-tight">67,956</div>
+   647→                      <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">km Total Route</div>
+   648→                    </div>
+   649→                  </div>
+   650→                  {/* Daily Trains */}
+   651→                  <div className="flex items-start gap-3 rounded-lg bg-muted/50 p-3 border border-border/40">
+   652→                    <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/10 shrink-0">
+   653→                      <TrainFront className="h-4 w-4 text-primary" />
+   654→                    </div>
+   655→                    <div>
+   656→                      <div className="text-lg font-bold tracking-tight">13,000+</div>
+   657→                      <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Daily Trains</div>
+   658→                    </div>
+   659→                  </div>
+   660→                  {/* Zones */}
+   661→                  <div className="flex items-start gap-3 rounded-lg bg-muted/50 p-3 border border-border/40">
+   662→                    <div className="flex h-8 w-8 items-center justify-center rounded-md bg-amber-500/10 shrink-0">
+   663→                      <Layers className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+   664→                    </div>
+   665→                    <div>
+   666→                      <div className="text-lg font-bold tracking-tight">18</div>
+   667→                      <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Zones</div>
+   668→                    </div>
+   669→                  </div>
+   670→                  {/* Divisions */}
+   671→                  <div className="flex items-start gap-3 rounded-lg bg-muted/50 p-3 border border-border/40">
+   672→                    <div className="flex h-8 w-8 items-center justify-center rounded-md bg-emerald-500/10 shrink-0">
+   673→                      <Network className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+   674→                    </div>
+   675→                    <div>
+   676→                      <div className="text-lg font-bold tracking-tight">72</div>
+   677→                      <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Divisions</div>
+   678→                    </div>
+   679→                  </div>
+   680→                </div>
+   681→              </motion.div>
+   682→            )}
+   683→          </CardContent>
+   684→        </Card>
+   685→      </motion.div>
+   686→    </div>
+   687→  )
+   688→}
+   689→

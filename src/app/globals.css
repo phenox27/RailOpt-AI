@@ -1,0 +1,685 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+
+  /* RailOpt AI semantic colors */
+  --color-rail-info: var(--info);
+  --color-rail-success: var(--success);
+  --color-rail-warning: var(--warning);
+  --color-rail-danger: var(--danger);
+  --color-rail-surface: var(--surface);
+  --color-rail-surface-muted: var(--surface-muted);
+  --color-rail-surface-hover: var(--surface-hover);
+  --color-rail-border-strong: var(--border-strong);
+  --color-rail-text-secondary: var(--text-secondary);
+  --color-rail-text-muted: var(--text-muted);
+
+  /* Indian Government tricolor palette */
+  --color-india-saffron: #FF9933;
+  --color-india-white: #FFFFFF;
+  --color-india-green: #138808;
+  --color-india-navy: #1a237e;
+  --color-india-navy-light: #0d47a1;
+  --color-india-gold: #C8A415;
+}
+
+/* Light Theme - RailOpt AI (Indian Government Style) */
+:root {
+  --radius: 0.5rem;
+  --background: #F6F8FA;
+  --foreground: #17212B;
+  --surface: #FFFFFF;
+  --surface-muted: #F1F4F7;
+  --surface-hover: #E9EEF3;
+  --border-strong: #B8C3CF;
+  --text-secondary: #52606D;
+  --text-muted: #71808F;
+
+  --card: #FFFFFF;
+  --card-foreground: #17212B;
+  --popover: #FFFFFF;
+  --popover-foreground: #17212B;
+
+  --primary: #1a237e;
+  --primary-foreground: #FFFFFF;
+  --secondary: #F1F4F7;
+  --secondary-foreground: #17212B;
+  --muted: #F1F4F7;
+  --muted-foreground: #52606D;
+  --accent: #F1F4F7;
+  --accent-foreground: #17212B;
+
+  --info: #0d47a1;
+  --success: #138808;
+  --warning: #FF9933;
+  --danger: #C62828;
+  --destructive: #C62828;
+
+  --border: #D7DEE6;
+  --input: #D7DEE6;
+  --ring: #1a237e;
+
+  --chart-1: #1a237e;
+  --chart-2: #FF9933;
+  --chart-3: #138808;
+  --chart-4: #0d47a1;
+  --chart-5: #C62828;
+
+  --sidebar: #FFFFFF;
+  --sidebar-foreground: #17212B;
+  --sidebar-primary: #1a237e;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: #F1F4F7;
+  --sidebar-accent-foreground: #17212B;
+  --sidebar-border: #D7DEE6;
+  --sidebar-ring: #1a237e;
+
+  --shadow-sm: 0 1px 2px rgba(15, 20, 26, 0.06);
+  --shadow-md: 0 4px 12px rgba(15, 20, 26, 0.10);
+  --shadow-lg: 0 12px 30px rgba(15, 20, 26, 0.14);
+}
+
+/* Dark Theme - RailOpt AI (Indian Government Style) */
+.dark {
+  --background: #0F141A;
+  --foreground: #F3F6F8;
+  --surface: #171D24;
+  --surface-muted: #202832;
+  --surface-hover: #27323D;
+  --border-strong: #465362;
+  --text-secondary: #B8C3CD;
+  --text-muted: #8D9AA7;
+
+  --card: #171D24;
+  --card-foreground: #F3F6F8;
+  --popover: #171D24;
+  --popover-foreground: #F3F6F8;
+
+  --primary: #7986CB;
+  --primary-foreground: #0F141A;
+  --secondary: #202832;
+  --secondary-foreground: #F3F6F8;
+  --muted: #202832;
+  --muted-foreground: #B8C3CD;
+  --accent: #202832;
+  --accent-foreground: #F3F6F8;
+
+  --info: #64B5F6;
+  --success: #66BB6A;
+  --warning: #FFB74D;
+  --danger: #F87171;
+  --destructive: #F87171;
+
+  --border: #303B47;
+  --input: #303B47;
+  --ring: #7986CB;
+
+  --chart-1: #7986CB;
+  --chart-2: #FFB74D;
+  --chart-3: #66BB6A;
+  --chart-4: #64B5F6;
+  --chart-5: #F87171;
+
+  --sidebar: #171D24;
+  --sidebar-foreground: #F3F6F8;
+  --sidebar-primary: #7986CB;
+  --sidebar-primary-foreground: #0F141A;
+  --sidebar-accent: #202832;
+  --sidebar-accent-foreground: #F3F6F8;
+  --sidebar-border: #303B47;
+  --sidebar-ring: #7986CB;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 12px 30px rgba(0, 0, 0, 0.4);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    scroll-behavior: smooth;
+    scroll-padding-top: 4rem;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    transition: background-color 0.2s ease, color 0.2s ease;
+  }
+  *:focus-visible {
+    outline: 2px solid hsl(var(--primary));
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+}
+
+/* Custom scrollbar styling */
+@layer base {
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--border-strong);
+  }
+}
+
+/* Priority indicator pulse animation */
+@keyframes priority-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.priority-pulse {
+  animation: priority-pulse 2s ease-in-out infinite;
+}
+
+/* Offline mode banner */
+.offline-banner {
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--warning),
+    var(--warning) 10px,
+    transparent 10px,
+    transparent 20px
+  );
+}
+
+/* Shimmer animation for CTA buttons */
+@keyframes shimmer-move {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+@keyframes shimmer {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.92; }
+}
+
+/* Page transition */
+@keyframes page-enter {
+  0% { opacity: 0; transform: translateY(6px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+.page-transition {
+  animation: page-enter 0.2s ease-out;
+}
+
+/* Thin scrollbar for horizontal scroll areas */
+.scrollbar-thin::-webkit-scrollbar {
+  height: 4px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 2px;
+}
+
+/* Touch-friendly minimum sizes */
+@media (max-width: 640px) {
+  /* Ensure interactive elements are at least 44px touch targets */
+  .touch-target {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
+/* Print styles - hide navigation, show only plan content */
+@media print {
+  /* Hide non-essential UI elements */
+  .print\:hidden,
+  [data-sidebar],
+  button,
+  nav,
+  aside,
+  [role="navigation"],
+  [aria-label="breadcrumb"],
+  .no-print {
+    display: none !important;
+  }
+
+  /* Show print-only elements */
+  .print\:block {
+    display: block !important;
+  }
+
+  /* Reset backgrounds for print */
+  body {
+    background: white !important;
+    color: black !important;
+  }
+
+  /* Show only the print area */
+  .print-area,
+  .print-keep {
+    display: block !important;
+  }
+
+  /* Hide interactive elements within print areas */
+  .print-area button,
+  .print-area .no-print {
+    display: none !important;
+  }
+
+  /* Ensure cards have borders for print */
+  [data-slot="card"],
+  .print-card {
+    border: 1px solid #ccc !important;
+    box-shadow: none !important;
+    break-inside: avoid;
+  }
+
+  /* Ensure full width for print area */
+  .print-area {
+    width: 100% !important;
+    max-width: 100% !important;
+    padding: 8px !important;
+    margin: 0 !important;
+  }
+
+  /* Print-friendly text colors */
+  .print-area h1,
+  .print-area h2,
+  .print-area h3,
+  .print-area h4 {
+    color: #000 !important;
+  }
+
+  .print-area p,
+  .print-area span,
+  .print-area div {
+    color: #333 !important;
+  }
+
+  .print-area .text-muted-foreground,
+  .print-area [class*="text-muted"] {
+    color: #666 !important;
+  }
+
+  /* Page break control */
+  .print-break-before {
+    break-before: page;
+  }
+
+  .print-break-after {
+    break-after: page;
+  }
+
+  /* Keep sections together */
+  .print-keep {
+    break-inside: avoid;
+  }
+
+  /* Print header */
+  .print-header {
+    display: block !important;
+    text-align: center;
+    border-bottom: 2px solid #333;
+    padding-bottom: 8px;
+    margin-bottom: 16px;
+  }
+
+  /* Reset shadows */
+  * {
+    box-shadow: none !important;
+  }
+
+  /* Reset backgrounds for cards */
+  .print-area [class*="bg-"] {
+    background: transparent !important;
+  }
+}
+
+/* Activity Ticker - CSS marquee animation */
+@keyframes ticker-scroll {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-33.333%); }
+}
+
+.ticker-scroll {
+  animation: ticker-scroll 45s linear infinite;
+  will-change: transform;
+}
+
+.ticker-scroll:hover {
+  animation-play-state: paused;
+}
+
+/* ===== Glassmorphism & Visual Polish Enhancements ===== */
+
+/* Gradient mesh background animation */
+@keyframes gradient-mesh {
+  0%, 100% {
+    background-position: 0% 50%;
+  }
+  25% {
+    background-position: 100% 0%;
+  }
+  50% {
+    background-position: 100% 100%;
+  }
+  75% {
+    background-position: 0% 100%;
+  }
+}
+
+/* Dot pulse animation for status indicators */
+@keyframes dot-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(1.15); }
+}
+
+/* Conic gradient border rotation */
+@keyframes gradient-rotate {
+  0% { --gradient-angle: 0deg; }
+  100% { --gradient-angle: 360deg; }
+}
+
+/* Workflow line pulse animation */
+@keyframes line-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+/* Dramatic shimmer sweep for CTA buttons */
+@keyframes shimmer-sweep {
+  0% { transform: translateX(-150%); }
+  100% { transform: translateX(150%); }
+}
+
+/* Glass card utility - frosted glass effect */
+.glass-card {
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  background: color-mix(in srgb, var(--card) 80%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+}
+
+/* Gradient border utility - animated conic-gradient border */
+.gradient-border {
+  position: relative;
+  isolation: isolate;
+}
+
+.gradient-border::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  background: conic-gradient(
+    from var(--gradient-angle, 0deg),
+    var(--primary) 0%,
+    transparent 15%,
+    transparent 35%,
+    var(--info) 50%,
+    transparent 65%,
+    transparent 85%,
+    var(--primary) 100%
+  );
+  z-index: -1;
+  animation: gradient-rotate 4s linear infinite;
+  opacity: 0.3;
+  transition: opacity 0.3s ease;
+}
+
+.gradient-border:hover::before {
+  opacity: 0.6;
+}
+
+/* Dot grid background pattern */
+.dot-grid {
+  background-image: radial-gradient(circle, var(--border) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* Section heading gradient underline */
+.heading-gradient-underline {
+  position: relative;
+  display: inline-block;
+}
+
+.heading-gradient-underline::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: -2px;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(to right, var(--info), transparent);
+  opacity: 0.4;
+  border-radius: 1px;
+}
+
+/* Animated ring pulse for overdue/critical indicators */
+@keyframes ring-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(var(--danger-rgb, 198, 40, 40), 0.4); }
+  70% { box-shadow: 0 0 0 6px rgba(var(--danger-rgb, 198, 40, 40), 0); }
+  100% { box-shadow: 0 0 0 0 rgba(var(--danger-rgb, 198, 40, 40), 0); }
+}
+
+.ring-pulse {
+  animation: ring-pulse 2s ease-in-out infinite;
+}
+
+/* Workflow connecting line pulse */
+.workflow-line-pulse {
+  animation: line-pulse 2s ease-in-out infinite;
+}
+
+/* ===== R8-1: Micro-interaction Polish Enhancements ===== */
+
+/* Border glow animation for KPI row and selected elements */
+@keyframes border-glow {
+  0%, 100% {
+    box-shadow: 0 0 3px 0 color-mix(in srgb, var(--primary) 15%, transparent),
+                0 0 8px 0 color-mix(in srgb, var(--primary) 5%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 5px 0 color-mix(in srgb, var(--primary) 30%, transparent),
+                0 0 14px 0 color-mix(in srgb, var(--primary) 10%, transparent);
+  }
+}
+
+.border-glow {
+  animation: border-glow 3s ease-in-out infinite;
+}
+
+/* Heartbeat animation for status indicator pulse line */
+@keyframes heartbeat {
+  0%, 100% { transform: scaleY(1); }
+  15% { transform: scaleY(1.3); }
+  30% { transform: scaleY(0.8); }
+  45% { transform: scaleY(1.15); }
+  60% { transform: scaleY(1); }
+}
+
+.heartbeat-line {
+  animation: heartbeat 1.5s ease-in-out infinite;
+  transform-origin: bottom;
+}
+
+/* Animated gradient accent line for top bar */
+@keyframes accent-shift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+.accent-line {
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--primary) 20%,
+    var(--info) 50%,
+    var(--primary) 80%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: accent-shift 4s ease-in-out infinite;
+  opacity: 0.5;
+}
+
+/* Subtle pulsing dot animation for attention-drawing buttons */
+@keyframes attention-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(1.4); }
+}
+
+.attention-dot {
+  animation: attention-pulse 1.8s ease-in-out infinite;
+}
+
+/* Animated ring for workflow current step */
+@keyframes workflow-ring {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--primary) 30%, transparent); }
+  70% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--primary) 0%, transparent); }
+  100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--primary) 0%, transparent); }
+}
+
+.workflow-ring {
+  animation: workflow-ring 2s ease-in-out infinite;
+}
+
+/* Subtle icon bounce on hover */
+@keyframes icon-bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2px); }
+}
+
+.icon-bounce-hover:hover .icon-bounce-target {
+  animation: icon-bounce 0.4s ease-in-out;
+}
+
+/* Gradient progress bar for plan cards */
+@keyframes progress-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.gradient-progress-bar {
+  background: linear-gradient(
+    90deg,
+    var(--primary) 0%,
+    var(--info) 25%,
+    var(--primary) 50%,
+    var(--info) 75%,
+    var(--primary) 100%
+  );
+  background-size: 200% 100%;
+  animation: progress-shimmer 3s linear infinite;
+}
+
+/* Plan card hover glow */
+.plan-card-glow {
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.plan-card-glow:hover {
+  box-shadow: 0 0 12px 0 color-mix(in srgb, var(--primary) 8%, transparent),
+              0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+/* ===== R8-3: Additional Micro-interaction Keyframes ===== */
+
+/* Gentle floating animation for decorative elements */
+@keyframes float-gentle {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+
+.float-gentle {
+  animation: float-gentle 3s ease-in-out infinite;
+}
+
+/* Pulsing dot indicator for active nav items */
+@keyframes pulse-dot {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.3); opacity: 0.7; }
+}
+
+.pulse-dot {
+  animation: pulse-dot 1.5s ease-in-out infinite;
+}
+
+/* Border color glow cycle for hover effects */
+@keyframes border-glow-cycle {
+  0%, 100% {
+    border-color: color-mix(in srgb, var(--border) 80%, transparent);
+  }
+  50% {
+    border-color: color-mix(in srgb, var(--primary) 40%, var(--border) 60%);
+  }
+}
+
+.border-glow-hover:hover {
+  animation: border-glow-cycle 2s ease-in-out infinite;
+}
+
+/* Typing dots staggered animation */
+@keyframes typing-dot {
+  0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-4px); }
+}
+
+.typing-dot-1 { animation: typing-dot 1.4s ease-in-out infinite; }
+.typing-dot-2 { animation: typing-dot 1.4s ease-in-out 0.2s infinite; }
+.typing-dot-3 { animation: typing-dot 1.4s ease-in-out 0.4s infinite; }
+
+/* Notification badge bounce */
+@keyframes badge-bounce {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.15); }
+}
+
+.badge-bounce {
+  animation: badge-bounce 2s ease-in-out infinite;
+}

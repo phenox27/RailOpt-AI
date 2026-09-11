@@ -1,0 +1,635 @@
+     1→'use client'
+     2→
+     3→import { useState, useCallback } from 'react'
+     4→import {
+     5→  Sheet,
+     6→  SheetContent,
+     7→  SheetHeader,
+     8→  SheetTitle,
+     9→  SheetDescription,
+    10→  SheetFooter,
+    11→} from '@/components/ui/sheet'
+    12→import { Button } from '@/components/ui/button'
+    13→import { Badge } from '@/components/ui/badge'
+    14→import { Separator } from '@/components/ui/separator'
+    15→import { StatusBadge, type MaintenanceStatus } from './status-badge'
+    16→import { PriorityScore } from './priority-score'
+    17→import type { SimMaintenanceRequest, SimBlock } from '@/data/simulated-data'
+    18→import {
+    19→  CheckCircle2, XCircle, Edit3, Brain, Clock, AlertTriangle, MapPin, Building2, Gauge,
+    20→  FileText, User, Send, MessageSquare, Sparkles, Users, ShieldCheck, CircleDot,
+    21→} from 'lucide-react'
+    22→import { motion, AnimatePresence } from 'framer-motion'
+    23→
+    24→// Department config
+    25→const DEPT_CONFIG = {
+    26→  engineering: { label: 'Engineering', color: '#2563EB', bg: '#EFF6FF', border: '#BFDBFE' },
+    27→  snt: { label: 'Signal & Telecom', color: '#0EA5A4', bg: '#F0FDFA', border: '#99F6E4' },
+    28→  traction: { label: 'Traction Distribution', color: '#B77900', bg: '#FFFBEB', border: '#FDE68A' },
+    29→} as const
+    30→
+    31→const LEVEL_LABEL: Record<string, string> = {
+    32→  low: 'Low',
+    33→  medium: 'Medium',
+    34→  high: 'High',
+    35→  critical: 'Critical',
+    36→}
+    37→
+    38→const LEVEL_DOT: Record<string, string> = {
+    39→  low: 'bg-emerald-400',
+    40→  medium: 'bg-amber-400',
+    41→  high: 'bg-orange-500',
+    42→  critical: 'bg-red-500',
+    43→}
+    44→
+    45→// Status progression timeline definition
+    46→const STATUS_STEPS = [
+    47→  { key: 'pending', label: 'Created', icon: FileText, actor: 'System' },
+    48→  { key: 'scored', label: 'Priority Scored', icon: Sparkles, actor: 'AI Engine' },
+    49→  { key: 'assigned', label: 'Assigned', icon: Users, actor: 'Planner' },
+    50→  { key: 'verified', label: 'Verified', icon: ShieldCheck, actor: 'Verifier' },
+    51→] as const
+    52→
+    53→// Comment type
+    54→interface TimelineComment {
+    55→  id: string
+    56→  author: string
+    57→  initials: string
+    58→  timestamp: string
+    59→  message: string
+    60→}
+    61→
+    62→// Pre-populated realistic comments
+    63→function getInitialComments(request: SimMaintenanceRequest): TimelineComment[] {
+    64→  const base: TimelineComment[] = [
+    65→    {
+    66→      id: 'c1',
+    67→      author: 'System',
+    68→      initials: 'SY',
+    69→      timestamp: request.requestedDate,
+    70→      message: `Maintenance request created for ${request.section} — ${request.stationFrom} to ${request.stationTo}.`,
+    71→    },
+    72→  ]
+    73→
+    74→  if (request.status === 'scored' || request.status === 'assigned' || request.status === 'verified') {
+    75→    base.push({
+    76→      id: 'c2',
+    77→      author: 'Jeet',
+    78→      initials: 'JT',
+    79→      timestamp: '2025-01-15T10:30:00',
+    80→      message: 'Priority adjusted due to safety concern. Severity factor weighted higher for this corridor section.',
+    81→    })
+    82→  }
+    83→
+    84→  if (request.status === 'assigned' || request.status === 'verified') {
+    85→    base.push({
+    86→      id: 'c3',
+    87→      author: 'Debarshi',
+    88→      initials: 'DB',
+    89→      timestamp: '2025-01-16T09:15:00',
+    90→      message: 'Assigned to engineering team. Block window proposed for next available corridor slot.',
+    91→    })
+    92→  }
+    93→
+    94→  if (request.status === 'verified') {
+    95→    base.push({
+    96→      id: 'c4',
+    97→      author: 'Rupam',
+    98→      initials: 'RP',
+    99→      timestamp: '2025-01-17T14:45:00',
+   100→      message: 'Verification pending signal team review. All safety checks passed preliminarily.',
+   101→    })
+   102→    base.push({
+   103→      id: 'c5',
+   104→      author: 'Alivia',
+   105→      initials: 'AL',
+   106→      timestamp: '2025-01-17T16:20:00',
+   107→      message: 'Verified and approved. Block scheduling confirmed with no train conflicts detected.',
+   108→    })
+   109→  }
+   110→
+   111→  return base
+   112→}
+   113→
+   114→// Status step index helper
+   115→function getStepIndex(status: string): number {
+   116→  const map: Record<string, number> = { pending: 0, scored: 1, assigned: 2, verified: 3, rejected: -1 }
+   117→  return map[status] ?? 0
+   118→}
+   119→
+   120→interface RequestDetailDrawerProps {
+   121→  request: SimMaintenanceRequest | null
+   122→  open: boolean
+   123→  onOpenChange: (open: boolean) => void
+   124→  blocks?: SimBlock[]
+   125→}
+   126→
+   127→function InfoRow({ label, children }: { label: string; children: React.ReactNode }) {
+   128→  return (
+   129→    <div className="flex justify-between items-start gap-4 py-1.5">
+   130→      <span className="text-xs text-muted-foreground shrink-0">{label}</span>
+   131→      <div className="text-sm text-foreground text-right">{children}</div>
+   132→    </div>
+   133→  )
+   134→}
+   135→
+   136→function FactorBar({ label, value }: { label: string; value: string }) {
+   137→  const pct: Record<string, number> = { low: 25, medium: 50, high: 75, critical: 100 }
+   138→  const color: Record<string, string> = { low: '#16A34A', medium: '#D97706', high: '#EA580C', critical: '#DC2626' }
+   139→  return (
+   140→    <div className="space-y-1">
+   141→      <div className="flex items-center justify-between">
+   142→        <span className="text-xs text-muted-foreground">{label}</span>
+   143→        <span className="text-xs font-medium text-foreground capitalize">{value}</span>
+   144→      </div>
+   145→      <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+   146→        <div
+   147→          className="h-1.5 rounded-full transition-all"
+   148→          style={{ width: `${pct[value] ?? 0}%`, backgroundColor: color[value] ?? '#999' }}
+   149→        />
+   150→      </div>
+   151→    </div>
+   152→  )
+   153→}
+   154→
+   155→export function RequestDetailDrawer({ request, open, onOpenChange, blocks = [] }: RequestDetailDrawerProps) {
+   156→  // Local state for current status (allows action button updates)
+   157→  const [currentStatus, setCurrentStatus] = useState<MaintenanceStatus>('pending')
+   158→  const [comments, setComments] = useState<TimelineComment[]>([])
+   159→  const [newComment, setNewComment] = useState('')
+   160→  const [initialized, setInitialized] = useState(false)
+   161→
+   162→  // Initialize state when request changes
+   163→  const initRequest = useCallback(() => {
+   164→    if (request && !initialized) {
+   165→      setCurrentStatus(request.status as MaintenanceStatus)
+   166→      setComments(getInitialComments(request))
+   167→      setInitialized(true)
+   168→    }
+   169→    if (!request) {
+   170→      setInitialized(false)
+   171→    }
+   172→  }, [request, initialized])
+   173→
+   174→  // Reset when request changes
+   175→  if (request && !initialized) {
+   176→    initRequest()
+   177→  }
+   178→
+   179→  if (!request) return null
+   180→
+   181→  const dept = DEPT_CONFIG[request.department]
+   182→  const assignedBlock = request.blockId ? blocks.find((b) => b.id === request.blockId) : null
+   183→
+   184→  const formatDuration = (mins: number) => {
+   185→    if (mins >= 60) {
+   186→      const h = Math.floor(mins / 60)
+   187→      const m = mins % 60
+   188→      return m > 0 ? `${h}h ${m}m` : `${h}h`
+   189→    }
+   190→    return `${mins}m`
+   191→  }
+   192→
+   193→  const formatDate = (dateStr: string) => {
+   194→    return new Date(dateStr).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+   195→  }
+   196→
+   197→  const formatTimestamp = (dateStr: string) => {
+   198→    return new Date(dateStr).toLocaleString('en-IN', {
+   199→      day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true,
+   200→    })
+   201→  }
+   202→
+   203→  // Timeline step index
+   204→  const stepIndex = getStepIndex(currentStatus)
+   205→  const isRejected = currentStatus === 'rejected'
+   206→
+   207→  // Handle action button clicks
+   208→  const handleScorePriority = () => {
+   209→    setCurrentStatus('scored')
+   210→    setComments((prev) => [
+   211→      ...prev,
+   212→      {
+   213→        id: `c-${Date.now()}`,
+   214→        author: 'AI Engine',
+   215→        initials: 'AI',
+   216→        timestamp: new Date().toISOString(),
+   217→        message: 'Priority scoring completed. Score calculated based on severity, safety risk, asset criticality, and traffic impact factors.',
+   218→      },
+   219→    ])
+   220→  }
+   221→
+   222→  const handleAssignDepartment = () => {
+   223→    setCurrentStatus('assigned')
+   224→    setComments((prev) => [
+   225→      ...prev,
+   226→      {
+   227→        id: `c-${Date.now()}`,
+   228→        author: 'Debarshi',
+   229→        initials: 'DB',
+   230→        timestamp: new Date().toISOString(),
+   231→        message: `Assigned to ${dept.label} department. Block window will be proposed by AI optimization engine.`,
+   232→      },
+   233→    ])
+   234→  }
+   235→
+   236→  const handleMarkVerified = () => {
+   237→    setCurrentStatus('verified')
+   238→    setComments((prev) => [
+   239→      ...prev,
+   240→      {
+   241→        id: `c-${Date.now()}`,
+   242→        author: 'Rupam',
+   243→        initials: 'RP',
+   244→        timestamp: new Date().toISOString(),
+   245→        message: 'Verification completed. All safety and scheduling checks passed. Request is now verified.',
+   246→      },
+   247→    ])
+   248→  }
+   249→
+   250→  const handleAddComment = () => {
+   251→    if (!newComment.trim()) return
+   252→    setComments((prev) => [
+   253→      ...prev,
+   254→      {
+   255→        id: `c-${Date.now()}`,
+   256→        author: 'Current User',
+   257→        initials: 'CU',
+   258→        timestamp: new Date().toISOString(),
+   259→        message: newComment.trim(),
+   260→      },
+   261→    ])
+   262→    setNewComment('')
+   263→  }
+   264→
+   265→  // Action buttons based on status
+   266→  const canEdit = currentStatus !== 'verified' && currentStatus !== 'rejected'
+   267→
+   268→  return (
+   269→    <Sheet open={open} onOpenChange={(v) => { onOpenChange(v); if (!v) setInitialized(false) }}>
+   270→      <SheetContent side="right" className="sm:max-w-[480px] w-full overflow-y-auto p-0">
+   271→        <SheetHeader className="p-6 pb-3 border-b" style={{ borderColor: '#D7DEE6' }}>
+   272→          <div className="flex items-start gap-3">
+   273→            <div className="flex-1 min-w-0">
+   274→              <SheetTitle className="text-lg leading-snug">{request.title}</SheetTitle>
+   275→              <SheetDescription className="text-sm mt-1">{request.id}</SheetDescription>
+   276→            </div>
+   277→            <StatusBadge status={currentStatus} />
+   278→          </div>
+   279→        </SheetHeader>
+   280→
+   281→        <div className="p-6 space-y-6">
+   282→          {/* Description */}
+   283→          <div>
+   284→            <p className="text-sm text-foreground/80 leading-relaxed">{request.description}</p>
+   285→          </div>
+   286→
+   287→          {/* Department & Category */}
+   288→          <div className="flex items-center gap-3">
+   289→            <Badge
+   290→              variant="outline"
+   291→              className="rounded-full text-xs font-medium px-2.5"
+   292→              style={{ color: dept.color, backgroundColor: dept.bg, borderColor: dept.border }}
+   293→            >
+   294→              <Building2 className="w-3 h-3 mr-1" />
+   295→              {dept.label}
+   296→            </Badge>
+   297→            <Badge variant="outline" className="rounded-full text-xs font-medium px-2.5 text-muted-foreground border-border bg-muted/50">
+   298→              {request.category}
+   299→            </Badge>
+   300→          </div>
+   301→
+   302→          <Separator style={{ backgroundColor: '#D7DEE6' }} />
+   303→
+   304→          {/* ===== Status Progression Timeline ===== */}
+   305→          <div>
+   306→            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-4 flex items-center gap-1.5">
+   307→              <Clock className="w-3.5 h-3.5" />
+   308→              Status Timeline
+   309→            </h4>
+   310→            <div className="relative">
+   311→              {/* Vertical line */}
+   312→              <div className="absolute left-[15px] top-2 bottom-2 w-px bg-border" />
+   313→
+   314→              {STATUS_STEPS.map((step, idx) => {
+   315→                const isCompleted = idx < stepIndex
+   316→                const isCurrent = idx === stepIndex && !isRejected
+   317→                const isFuture = idx > stepIndex || isRejected
+   318→                const StepIcon = step.icon
+   319→
+   320→                return (
+   321→                  <motion.div
+   322→                    key={step.key}
+   323→                    initial={{ opacity: 0, x: -12 }}
+   324→                    animate={{ opacity: 1, x: 0 }}
+   325→                    transition={{ duration: 0.25, delay: idx * 0.08 }}
+   326→                    className="relative flex items-start gap-3 pb-4 last:pb-0"
+   327→                  >
+   328→                    {/* Dot */}
+   329→                    <div className="relative z-10 mt-0.5">
+   330→                      {isCurrent ? (
+   331→                        <div className="relative">
+   332→                          <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+   333→                            <StepIcon className="w-4 h-4 text-primary" />
+   334→                          </div>
+   335→                          {/* Pulsing ring */}
+   336→                          <div className="absolute inset-0 rounded-full border-2 border-primary animate-ping opacity-30" />
+   337→                        </div>
+   338→                      ) : isCompleted ? (
+   339→                        <div className="w-8 h-8 rounded-full bg-success/10 flex items-center justify-center">
+   340→                          <CheckCircle2 className="w-4 h-4 text-success" />
+   341→                        </div>
+   342→                      ) : (
+   343→                        <div className="w-8 h-8 rounded-full bg-muted/50 flex items-center justify-center">
+   344→                          <CircleDot className="w-4 h-4 text-muted-foreground/40" />
+   345→                        </div>
+   346→                      )}
+   347→                    </div>
+   348→
+   349→                    {/* Content */}
+   350→                    <div className="flex-1 min-w-0 pt-0.5">
+   351→                      <div className="flex items-center gap-2">
+   352→                        <span className={`text-sm font-medium ${isFuture ? 'text-muted-foreground/50' : 'text-foreground'}`}>
+   353→                          {step.label}
+   354→                        </span>
+   355→                        {isCompleted && (
+   356→                          <span className="text-[10px] text-success font-medium">Done</span>
+   357→                        )}
+   358→                        {isCurrent && (
+   359→                          <span className="text-[10px] text-primary font-medium animate-pulse">In Progress</span>
+   360→                        )}
+   361→                      </div>
+   362→                      <div className="flex items-center gap-2 mt-0.5">
+   363→                        <span className={`text-xs ${isFuture ? 'text-muted-foreground/40' : 'text-muted-foreground'}`}>
+   364→                          {step.actor}
+   365→                        </span>
+   366→                        {(isCompleted || isCurrent) && (
+   367→                          <span className="text-[10px] text-muted-foreground/60">
+   368→                            {formatTimestamp(
+   369→                              isCompleted
+   370→                                ? `2025-01-${14 + idx}T${9 + idx * 2}:${idx * 15}:00`
+   371→                                : new Date().toISOString()
+   372→                            )}
+   373→                          </span>
+   374→                        )}
+   375→                      </div>
+   376→                    </div>
+   377→                  </motion.div>
+   378→                )
+   379→              })}
+   380→
+   381→              {/* Rejected step (shown only when rejected) */}
+   382→              {isRejected && (
+   383→                <motion.div
+   384→                  initial={{ opacity: 0, x: -12 }}
+   385→                  animate={{ opacity: 1, x: 0 }}
+   386→                  transition={{ duration: 0.25, delay: 0.4 }}
+   387→                  className="relative flex items-start gap-3"
+   388→                >
+   389→                  <div className="relative z-10 mt-0.5">
+   390→                    <div className="w-8 h-8 rounded-full bg-destructive/10 flex items-center justify-center">
+   391→                      <XCircle className="w-4 h-4 text-destructive" />
+   392→                    </div>
+   393→                  </div>
+   394→                  <div className="flex-1 min-w-0 pt-0.5">
+   395→                    <span className="text-sm font-medium text-destructive">Rejected</span>
+   396→                    <p className="text-xs text-muted-foreground mt-0.5">
+   397→                      Request was rejected — {formatTimestamp(new Date().toISOString())}
+   398→                    </p>
+   399→                  </div>
+   400→                </motion.div>
+   401→              )}
+   402→            </div>
+   403→          </div>
+   404→
+   405→          <Separator style={{ backgroundColor: '#D7DEE6' }} />
+   406→
+   407→          {/* Priority Score */}
+   408→          <div>
+   409→            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-1.5">
+   410→              <Gauge className="w-3.5 h-3.5" />
+   411→              Priority Score
+   412→            </h4>
+   413→            <div className="flex items-center gap-3 mb-4">
+   414→              <PriorityScore
+   415→                score={request.priority}
+   416→                severity={request.severity}
+   417→                safetyRisk={request.safetyRisk}
+   418→                assetCriticality={request.assetCriticality}
+   419→                trafficImpact={request.trafficImpact}
+   420→                showLabel={false}
+   421→                size="md"
+   422→              />
+   423→              <span className="text-2xl font-bold tabular-nums" style={{
+   424→                color: request.priority >= 90 ? '#DC2626' : request.priority >= 75 ? '#EA580C' : request.priority >= 50 ? '#D97706' : '#16A34A'
+   425→              }}>
+   426→                {request.priority}
+   427→              </span>
+   428→              <span className="text-xs text-muted-foreground/60">/100</span>
+   429→            </div>
+   430→            <div className="space-y-2.5 bg-muted/50 rounded-lg p-3">
+   431→              <FactorBar label="Severity" value={request.severity} />
+   432→              <FactorBar label="Safety Risk" value={request.safetyRisk} />
+   433→              <FactorBar label="Asset Criticality" value={request.assetCriticality} />
+   434→              <FactorBar label="Traffic Impact" value={request.trafficImpact} />
+   435→            </div>
+   436→          </div>
+   437→
+   438→          <Separator style={{ backgroundColor: '#D7DEE6' }} />
+   439→
+   440→          {/* Details */}
+   441→          <div>
+   442→            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-1.5">
+   443→              <MapPin className="w-3.5 h-3.5" />
+   444→              Details
+   445→            </h4>
+   446→            <div className="bg-muted/50 rounded-lg p-3 space-y-0.5">
+   447→              <InfoRow label="Section">
+   448→                <span className="font-mono">{request.section}</span>
+   449→              </InfoRow>
+   450→              <InfoRow label="From">
+   451→                {request.stationFrom}
+   452→              </InfoRow>
+   453→              <InfoRow label="To">
+   454→                {request.stationTo}
+   455→              </InfoRow>
+   456→              <InfoRow label="Duration">
+   457→                <span className="flex items-center gap-1">
+   458→                  <Clock className="w-3 h-3 text-muted-foreground/60" />
+   459→                  {formatDuration(request.duration)}
+   460→                </span>
+   461→              </InfoRow>
+   462→              <InfoRow label="Requested">
+   463→                {formatDate(request.requestedDate)}
+   464→              </InfoRow>
+   465→              {request.isOverdue && (
+   466→                <InfoRow label="Overdue">
+   467→                  <span className="text-red-600 font-medium flex items-center gap-1">
+   468→                    <AlertTriangle className="w-3 h-3" />
+   469→                    Yes
+   470→                  </span>
+   471→                </InfoRow>
+   472→              )}
+   473→              <InfoRow label="Created By">
+   474→                <span className="font-mono text-xs">{request.createdBy}</span>
+   475→              </InfoRow>
+   476→            </div>
+   477→          </div>
+   478→
+   479→          {/* AI Recommendation */}
+   480→          {assignedBlock && (
+   481→            <>
+   482→              <Separator style={{ backgroundColor: '#D7DEE6' }} />
+   483→              <div>
+   484→                <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-1.5">
+   485→                  <Brain className="w-3.5 h-3.5" />
+   486→                  AI Recommendation
+   487→                </h4>
+   488→                <div className="bg-[#e8eaf6] border border-[#9fa8da] rounded-lg p-3 space-y-2">
+   489→                  <div className="flex items-center justify-between">
+   490→                    <span className="text-sm font-medium text-[#1a237e]">{assignedBlock.name}</span>
+   491→                    <Badge variant="outline" className="rounded-full text-[10px] px-1.5 bg-teal-100 text-[#0d47a1] border-[#5c6bc0]">
+   492→                      {Math.round(assignedBlock.aiConfidence * 100)}% confidence
+   493→                    </Badge>
+   494→                  </div>
+   495→                  <p className="text-xs text-[#0d47a1] leading-relaxed">{assignedBlock.aiReasoning}</p>
+   496→                  <div className="flex items-center gap-2 text-[11px] text-[#283593]">
+   497→                    <Clock className="w-3 h-3" />
+   498→                    {new Date(assignedBlock.startTime).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+   499→                    {' — '}
+   500→                    {new Date(assignedBlock.endTime).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+   501→                  </div>
+   502→                </div>
+   503→              </div>
+   504→            </>
+   505→          )}
+   506→
+   507→          {/* Risk Factors Summary */}
+   508→          <Separator style={{ backgroundColor: '#D7DEE6' }} />
+   509→          <div>
+   510→            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-1.5">
+   511→              <AlertTriangle className="w-3.5 h-3.5" />
+   512→              Risk Assessment
+   513→            </h4>
+   514→            <div className="grid grid-cols-2 gap-2">
+   515→              {([
+   516→                { label: 'Severity', value: request.severity },
+   517→                { label: 'Safety', value: request.safetyRisk },
+   518→                { label: 'Asset', value: request.assetCriticality },
+   519→                { label: 'Traffic', value: request.trafficImpact },
+   520→              ] as const).map((item) => (
+   521→                <div key={item.label} className="flex items-center gap-2 bg-muted/50 rounded-md px-2.5 py-2">
+   522→                  <div className={`w-2 h-2 rounded-full ${LEVEL_DOT[item.value]}`} />
+   523→                  <span className="text-[11px] text-muted-foreground">{item.label}</span>
+   524→                  <span className="text-xs font-medium text-foreground capitalize ml-auto">{item.value}</span>
+   525→                </div>
+   526→              ))}
+   527→            </div>
+   528→          </div>
+   529→
+   530→          <Separator style={{ backgroundColor: '#D7DEE6' }} />
+   531→
+   532→          {/* ===== Comments / Activity Log ===== */}
+   533→          <div>
+   534→            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-1.5">
+   535→              <MessageSquare className="w-3.5 h-3.5" />
+   536→              Activity & Comments
+   537→            </h4>
+   538→            <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
+   539→              <AnimatePresence mode="popLayout">
+   540→                {comments.map((comment) => (
+   541→                  <motion.div
+   542→                    key={comment.id}
+   543→                    initial={{ opacity: 0, y: 8, scale: 0.97 }}
+   544→                    animate={{ opacity: 1, y: 0, scale: 1 }}
+   545→                    exit={{ opacity: 0, y: -8, scale: 0.97 }}
+   546→                    transition={{ duration: 0.2 }}
+   547→                    className="flex gap-2.5"
+   548→                  >
+   549→                    {/* Avatar */}
+   550→                    <div className="w-7 h-7 rounded-full bg-muted flex items-center justify-center shrink-0 text-[10px] font-semibold text-muted-foreground">
+   551→                      {comment.initials}
+   552→                    </div>
+   553→                    {/* Content */}
+   554→                    <div className="flex-1 min-w-0">
+   555→                      <div className="flex items-center gap-2">
+   556→                        <span className="text-xs font-medium text-foreground">{comment.author}</span>
+   557→                        <span className="text-[10px] text-muted-foreground/60">
+   558→                          {formatTimestamp(comment.timestamp)}
+   559→                        </span>
+   560→                      </div>
+   561→                      <p className="text-xs text-foreground/80 leading-relaxed mt-0.5">
+   562→                        {comment.message}
+   563→                      </p>
+   564→                    </div>
+   565→                  </motion.div>
+   566→                ))}
+   567→              </AnimatePresence>
+   568→            </div>
+   569→
+   570→            {/* Add Comment Input */}
+   571→            <div className="flex items-center gap-2 mt-3">
+   572→              <div className="flex-1 relative">
+   573→                <input
+   574→                  type="text"
+   575→                  value={newComment}
+   576→                  onChange={(e) => setNewComment(e.target.value)}
+   577→                  onKeyDown={(e) => { if (e.key === 'Enter') handleAddComment() }}
+   578→                  placeholder="Add a comment..."
+   579→                  className="w-full h-9 px-3 pr-10 text-xs bg-muted/50 border border-border rounded-lg text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/30 transition-all"
+   580→                />
+   581→                <Button
+   582→                  variant="ghost"
+   583→                  size="sm"
+   584→                  className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 p-0 text-muted-foreground hover:text-primary"
+   585→                  onClick={handleAddComment}
+   586→                  disabled={!newComment.trim()}
+   587→                >
+   588→                  <Send className="h-3.5 w-3.5" />
+   589→                </Button>
+   590→              </div>
+   591→            </div>
+   592→          </div>
+   593→        </div>
+   594→
+   595→        {/* ===== Action Buttons ===== */}
+   596→        <SheetFooter className="p-6 pt-4 border-t bg-muted/50/50 print:hidden" style={{ borderColor: '#D7DEE6' }}>
+   597→          <div className="flex gap-2 w-full">
+   598→            {/* Status-specific action buttons */}
+   599→            {currentStatus === 'pending' && (
+   600→              <Button className="flex-1" size="sm" onClick={handleScorePriority} style={{ backgroundColor: '#0EA5A4' }}>
+   601→                <Sparkles className="w-3.5 h-3.5 mr-1.5" />
+   602→                Score Priority
+   603→              </Button>
+   604→            )}
+   605→            {currentStatus === 'scored' && (
+   606→              <Button className="flex-1" size="sm" onClick={handleAssignDepartment} style={{ backgroundColor: '#2563EB' }}>
+   607→                <Users className="w-3.5 h-3.5 mr-1.5" />
+   608→                Assign to Dept
+   609→              </Button>
+   610→            )}
+   611→            {currentStatus === 'assigned' && (
+   612→              <Button className="flex-1" size="sm" onClick={handleMarkVerified} style={{ backgroundColor: '#16A34A' }}>
+   613→                <ShieldCheck className="w-3.5 h-3.5 mr-1.5" />
+   614→                Mark Verified
+   615→              </Button>
+   616→            )}
+   617→            {canEdit && currentStatus !== 'pending' && currentStatus !== 'scored' && currentStatus !== 'assigned' && (
+   618→              <Button variant="outline" className="flex-1" size="sm">
+   619→                <Edit3 className="w-3.5 h-3.5 mr-1.5" />
+   620→                Edit
+   621→              </Button>
+   622→            )}
+   623→            {currentStatus !== 'verified' && currentStatus !== 'rejected' && (
+   624→              <Button variant="destructive" className="flex-1" size="sm">
+   625→                <XCircle className="w-3.5 h-3.5 mr-1.5" />
+   626→                Reject
+   627→              </Button>
+   628→            )}
+   629→          </div>
+   630→        </SheetFooter>
+   631→      </SheetContent>
+   632→    </Sheet>
+   633→  )
+   634→}
+   635→

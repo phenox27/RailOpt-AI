@@ -1,0 +1,1451 @@
+     1→'use client'
+     2→
+     3→import { useState, useEffect, useRef, useCallback } from 'react'
+     4→import Image from 'next/image'
+     5→import { motion, useInView, useReducedMotion, AnimatePresence } from 'framer-motion'
+     6→import { Button } from '@/components/ui/button'
+     7→import { Card, CardContent } from '@/components/ui/card'
+     8→import { Badge } from '@/components/ui/badge'
+     9→import {
+    10→  Clock,
+    11→  AlertTriangle,
+    12→  IndianRupee,
+    13→  Brain,
+    14→  ShieldCheck,
+    15→  Users,
+    16→  Wrench,
+    17→  BarChart3,
+    18→  CheckCircle2,
+    19→  Database,
+    20→  Cpu,
+    21→  Wifi,
+    22→  Lock,
+    23→  WifiOff,
+    24→  Accessibility,
+    25→  ArrowRight,
+    26→  ChevronRight,
+    27→  Zap,
+    28→  Layers,
+    29→  Route,
+    30→  Gauge,
+    31→  Globe,
+    32→  MapPin,
+    33→  Cable,
+    34→  Activity,
+    35→  Play,
+    36→  MousePointerClick,
+    37→  Menu,
+    38→  X,
+    39→  LogIn,
+    40→  UserPlus,
+    41→} from 'lucide-react'
+    42→
+    43→/* ─── Constants ─── */
+    44→const SAFFRON = '#FF9933'
+    45→const INDIAN_GREEN = '#138808'
+    46→const NAVY = '#1a237e'
+    47→const INDIGO = '#0d47a1'
+    48→
+    49→/* ─── Animated Counter Component ─── */
+    50→function AnimatedCounter({
+    51→  end,
+    52→  duration = 2000,
+    53→  className = '',
+    54→  prefix = '',
+    55→  suffix = '',
+    56→  displayOverride,
+    57→}: {
+    58→  end: number
+    59→  duration?: number
+    60→  className?: string
+    61→  prefix?: string
+    62→  suffix?: string
+    63→  displayOverride?: string
+    64→}) {
+    65→  const [count, setCount] = useState(0)
+    66→  const ref = useRef<HTMLDivElement>(null)
+    67→  const isInView = useInView(ref, { once: true, margin: '-100px' })
+    68→  const shouldReduce = useReducedMotion()
+    69→  const hasStarted = useRef(false)
+    70→
+    71→  useEffect(() => {
+    72→    if (!isInView || hasStarted.current) return
+    73→    hasStarted.current = true
+    74→
+    75→    let rafId: number
+    76→    if (shouldReduce) {
+    77→      rafId = requestAnimationFrame(() => setCount(end))
+    78→    } else {
+    79→      let startTime: number | null = null
+    80→      const step = (timestamp: number) => {
+    81→        if (!startTime) startTime = timestamp
+    82→        const progress = Math.min((timestamp - startTime) / duration, 1)
+    83→        const eased = 1 - Math.pow(1 - progress, 3)
+    84→        setCount(Math.floor(eased * end))
+    85→        if (progress < 1) {
+    86→          rafId = requestAnimationFrame(step)
+    87→        }
+    88→      }
+    89→      rafId = requestAnimationFrame(step)
+    90→    }
+    91→    return () => cancelAnimationFrame(rafId)
+    92→  }, [isInView, end, duration, shouldReduce])
+    93→
+    94→  return (
+    95→    <div ref={ref} className={className}>
+    96→      {prefix}
+    97→      {displayOverride ? displayOverride : count.toLocaleString('en-IN')}
+    98→      {suffix}
+    99→    </div>
+   100→  )
+   101→}
+   102→
+   103→/* ─── Tricolor Strip ─── */
+   104→function TricolorStrip({ className = '' }: { className?: string }) {
+   105→  return (
+   106→    <div className={`flex h-1 w-full ${className}`} aria-hidden="true">
+   107→      <div className="flex-1" style={{ backgroundColor: SAFFRON }} />
+   108→      <div className="flex-1 bg-white" />
+   109→      <div className="flex-1" style={{ backgroundColor: INDIAN_GREEN }} />
+   110→    </div>
+   111→  )
+   112→}
+   113→
+   114→/* ─── Ashoka Chakra Inspired Pattern ─── */
+   115→function ChakraPattern() {
+   116→  const spokes = 24
+   117→  return (
+   118→    <div className="absolute right-8 top-1/2 -translate-y-1/2 w-64 h-64 opacity-[0.06] pointer-events-none hidden lg:block" aria-hidden="true">
+   119→      <svg viewBox="0 0 200 200" className="w-full h-full">
+   120→        <circle cx="100" cy="100" r="95" fill="none" stroke="white" strokeWidth="1.5" />
+   121→        <circle cx="100" cy="100" r="75" fill="none" stroke="white" strokeWidth="0.5" />
+   122→        <circle cx="100" cy="100" r="20" fill="none" stroke="white" strokeWidth="1" />
+   123→        {Array.from({ length: spokes }).map((_, i) => {
+   124→          const angle = (i * 360) / spokes
+   125→          const rad = (angle * Math.PI) / 180
+   126→          const x1 = 100 + 20 * Math.cos(rad)
+   127→          const y1 = 100 + 20 * Math.sin(rad)
+   128→          const x2 = 100 + 95 * Math.cos(rad)
+   129→          const y2 = 100 + 95 * Math.sin(rad)
+   130→          return (
+   131→            <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke="white" strokeWidth="0.8" />
+   132→          )
+   133→        })}
+   134→      </svg>
+   135→    </div>
+   136→  )
+   137→}
+   138→
+   139→/* ─── Railway Track SVG ─── */
+   140→function RailwayTrack() {
+   141→  return (
+   142→    <div className="absolute bottom-0 left-0 right-0 h-24 opacity-20 pointer-events-none" aria-hidden="true">
+   143→      <svg viewBox="0 0 1200 100" preserveAspectRatio="none" className="w-full h-full">
+   144→        <line x1="0" y1="90" x2="600" y2="40" stroke="white" strokeWidth="2" />
+   145→        <line x1="1200" y1="90" x2="600" y2="40" stroke="white" strokeWidth="2" />
+   146→        {Array.from({ length: 20 }).map((_, i) => {
+   147→          const t = i / 19
+   148→          const y = 90 - t * 50
+   149→          const spread = 600 * (1 - t * 0.85)
+   150→          return (
+   151→            <line
+   152→              key={i}
+   153→              x1={600 - spread}
+   154→              y1={y}
+   155→              x2={600 + spread}
+   156→              y2={y}
+   157→              stroke="white"
+   158→              strokeWidth="1.5"
+   159→              opacity={1 - t * 0.6}
+   160→            />
+   161→          )
+   162→        })}
+   163→      </svg>
+   164→    </div>
+   165→  )
+   166→}
+   167→
+   168→/* ─── Floating Particles ─── */
+   169→function FloatingParticles() {
+   170→  const shouldReduce = useReducedMotion()
+   171→  if (shouldReduce) return null
+   172→
+   173→  return (
+   174→    <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden="true">
+   175→      {Array.from({ length: 30 }).map((_, i) => (
+   176→        <motion.div
+   177→          key={i}
+   178→          className="absolute w-1 h-1 rounded-full bg-white/20"
+   179→          style={{
+   180→            left: `${((i * 37 + 13) % 100)}%`,
+   181→            top: `${((i * 53 + 7) % 100)}%`,
+   182→          }}
+   183→          animate={{
+   184→            y: [0, -30, 0],
+   185→            opacity: [0.2, 0.6, 0.2],
+   186→          }}
+   187→          transition={{
+   188→            duration: 3 + (i % 5),
+   189→            repeat: Infinity,
+   190→            delay: (i % 4) * 0.7,
+   191→            ease: 'easeInOut',
+   192→          }}
+   193→        />
+   194→      ))}
+   195→    </div>
+   196→  )
+   197→}
+   198→
+   199→/* ─── Dot Grid Pattern ─── */
+   200→function DotGrid() {
+   201→  return (
+   202→    <div
+   203→      className="absolute inset-0 opacity-[0.04] pointer-events-none"
+   204→      aria-hidden="true"
+   205→      style={{
+   206→        backgroundImage: 'radial-gradient(circle, #1a237e 1px, transparent 1px)',
+   207→        backgroundSize: '24px 24px',
+   208→      }}
+   209→    />
+   210→  )
+   211→}
+   212→
+   213→/* ─── Section Wrapper ─── */
+   214→function Section({
+   215→  children,
+   216→  className = '',
+   217→  id,
+   218→}: {
+   219→  children: React.ReactNode
+   220→  className?: string
+   221→  id?: string
+   222→}) {
+   223→  return (
+   224→    <section id={id} className={`relative py-16 md:py-24 scroll-mt-20 ${className}`}>
+   225→      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">{children}</div>
+   226→    </section>
+   227→  )
+   228→}
+   229→
+   230→/* ─── Section Title ─── */
+   231→function SectionTitle({
+   232→  en,
+   233→  hi,
+   234→  light = false,
+   235→}: {
+   236→  en: string
+   237→  hi: string
+   238→  light?: boolean
+   239→}) {
+   240→  const ref = useRef<HTMLDivElement>(null)
+   241→  const isInView = useInView(ref, { once: true, margin: '-50px' })
+   242→
+   243→  return (
+   244→    <motion.div
+   245→      ref={ref}
+   246→      initial={{ opacity: 0, y: 20 }}
+   247→      animate={isInView ? { opacity: 1, y: 0 } : {}}
+   248→      transition={{ duration: 0.6 }}
+   249→      className="text-center mb-12 md:mb-16"
+   250→    >
+   251→      <h2
+   252→        className={`text-3xl md:text-4xl lg:text-5xl font-bold mb-2 ${
+   253→          light ? 'text-white' : 'text-[#1a237e]'
+   254→        }`}
+   255→      >
+   256→        {en}
+   257→      </h2>
+   258→      <p className={`text-lg md:text-xl ${light ? 'text-white/70' : 'text-gray-500'}`}>
+   259→        {hi}
+   260→      </p>
+   261→    </motion.div>
+   262→  )
+   263→}
+   264→
+   265→/* ─── Shimmer Button ─── */
+   266→function ShimmerButton({
+   267→  children,
+   268→  className = '',
+   269→  onClick,
+   270→  variant = 'primary',
+   271→}: {
+   272→  children: React.ReactNode
+   273→  className?: string
+   274→  onClick?: () => void
+   275→  variant?: 'primary' | 'outline'
+   276→}) {
+   277→  const shouldReduce = useReducedMotion()
+   278→
+   279→  if (variant === 'outline') {
+   280→    return (
+   281→      <motion.button
+   282→        whileHover={shouldReduce ? {} : { scale: 1.03 }}
+   283→        whileTap={{ scale: 0.97 }}
+   284→        onClick={onClick}
+   285→        className={`relative overflow-hidden px-8 py-3 rounded-lg border-2 border-white text-white font-semibold text-lg transition-colors hover:bg-white/10 ${className}`}
+   286→      >
+   287→        {children}
+   288→      </motion.button>
+   289→    )
+   290→  }
+   291→
+   292→  return (
+   293→    <motion.button
+   294→      whileHover={shouldReduce ? {} : { scale: 1.03 }}
+   295→      whileTap={{ scale: 0.97 }}
+   296→      onClick={onClick}
+   297→      className={`relative overflow-hidden px-8 py-3 rounded-lg font-semibold text-lg text-white ${className}`}
+   298→      style={{ backgroundColor: NAVY }}
+   299→    >
+   300→      {!shouldReduce && (
+   301→        <motion.div
+   302→          className="absolute inset-0 -translate-x-full"
+   303→          style={{
+   304→            background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent)',
+   305→          }}
+   306→          animate={{ x: ['-100%', '200%'] }}
+   307→          transition={{ duration: 2.5, repeat: Infinity, repeatDelay: 1, ease: 'easeInOut' }}
+   308→        />
+   309→      )}
+   310→      <span className="relative z-10">{children}</span>
+   311→    </motion.button>
+   312→  )
+   313→}
+   314→
+   315→/* ─── Animated Text Reveal ─── */
+   316→function AnimatedTitle({ text, className = '' }: { text: string; className?: string }) {
+   317→  const shouldReduce = useReducedMotion()
+   318→  const ref = useRef<HTMLDivElement>(null)
+   319→  const isInView = useInView(ref, { once: true })
+   320→
+   321→  if (shouldReduce) {
+   322→    return <div ref={ref} className={className}>{text}</div>
+   323→  }
+   324→
+   325→  return (
+   326→    <div ref={ref} className={className} aria-label={text}>
+   327→      {text.split('').map((char, i) => (
+   328→        <motion.span
+   329→          key={i}
+   330→          initial={{ opacity: 0, y: 20 }}
+   331→          animate={isInView ? { opacity: 1, y: 0 } : {}}
+   332→          transition={{ duration: 0.4, delay: i * 0.05, ease: 'easeOut' }}
+   333→          className="inline-block"
+   334→          aria-hidden="true"
+   335→        >
+   336→          {char === ' ' ? '\u00A0' : char}
+   337→        </motion.span>
+   338→      ))}
+   339→    </div>
+   340→  )
+   341→}
+   342→
+   343→/* ═══════════════════════════════════════════════════════
+   344→   STICKY NAVIGATION BAR
+   345→   ═══════════════════════════════════════════════════════ */
+   346→function StickyNavBar({ onEnterApp, onSignUp }: { onEnterApp: () => void; onSignUp: () => void }) {
+   347→  const [scrolled, setScrolled] = useState(false)
+   348→  const [mobileOpen, setMobileOpen] = useState(false)
+   349→  const shouldReduce = useReducedMotion()
+   350→
+   351→  useEffect(() => {
+   352→    const handleScroll = () => setScrolled(window.scrollY > 40)
+   353→    window.addEventListener('scroll', handleScroll, { passive: true })
+   354→    return () => window.removeEventListener('scroll', handleScroll)
+   355→  }, [])
+   356→
+   357→  // Lock body scroll when mobile menu is open
+   358→  useEffect(() => {
+   359→    if (mobileOpen) {
+   360→      document.body.style.overflow = 'hidden'
+   361→    } else {
+   362→      document.body.style.overflow = ''
+   363→    }
+   364→    return () => { document.body.style.overflow = '' }
+   365→  }, [mobileOpen])
+   366→
+   367→  const navLinks = [
+   368→    { label: 'Features', href: '#solution' },
+   369→    { label: 'Impact', href: '#impact' },
+   370→    { label: 'How It Works', href: '#how-it-works' },
+   371→    { label: 'Coverage', href: '#coverage' },
+   372→  ]
+   373→
+   374→  return (
+   375→    <>
+   376→      {/* Tricolor strip at very top */}
+   377→      <div className="fixed top-0 left-0 right-0 z-[60] flex h-[3px] w-full" aria-hidden="true">
+   378→        <div className="flex-1" style={{ backgroundColor: SAFFRON }} />
+   379→        <div className="flex-1 bg-white" />
+   380→        <div className="flex-1" style={{ backgroundColor: INDIAN_GREEN }} />
+   381→      </div>
+   382→
+   383→      {/* Main nav bar */}
+   384→      <motion.nav
+   385→        initial={{ y: -80 }}
+   386→        animate={{ y: 0 }}
+   387→        transition={{ duration: 0.5, ease: 'easeOut' }}
+   388→        className={`fixed top-[3px] left-0 right-0 z-50 transition-all duration-300 ${
+   389→          scrolled
+   390→            ? 'bg-[#1a237e]/95 backdrop-blur-md shadow-lg'
+   391→            : 'bg-transparent backdrop-blur-none'
+   392→        }`}
+   393→      >
+   394→        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+   395→          <div className="flex items-center justify-between h-16">
+   396→            {/* Logo + Name */}
+   397→            <a href="#" className="flex items-center gap-2.5 shrink-0" onClick={(e) => { e.preventDefault(); window.scrollTo({ top: 0, behavior: 'smooth' }) }}>
+   398→              <Image
+   399→                src="/logo.png"
+   400→                alt="RailOpt AI"
+   401→                width={36}
+   402→                height={36}
+   403→                className="rounded-lg"
+   404→                style={{ width: 'auto', height: 'auto', maxWidth: '2.25rem', maxHeight: '2.25rem' }}
+   405→              />
+   406→              <span className={`font-bold text-lg tracking-tight transition-colors duration-300 ${scrolled ? 'text-white' : 'text-white'}`}>
+   407→                RailOpt AI
+   408→              </span>
+   409→            </a>
+   410→
+   411→            {/* Desktop Nav Links */}
+   412→            <div className="hidden md:flex items-center gap-6">
+   413→              {navLinks.map((link) => (
+   414→                <a
+   415→                  key={link.href}
+   416→                  href={link.href}
+   417→                  className={`text-sm font-medium transition-colors duration-200 hover:text-[#FF9933] ${
+   418→                    scrolled ? 'text-white/80' : 'text-white/80'
+   419→                  }`}
+   420→                >
+   421→                  {link.label}
+   422→                </a>
+   423→              ))}
+   424→            </div>
+   425→
+   426→            {/* Desktop Auth Buttons */}
+   427→            <div className="hidden md:flex items-center gap-3">
+   428→              <motion.button
+   429→                whileHover={shouldReduce ? {} : { scale: 1.03 }}
+   430→                whileTap={{ scale: 0.97 }}
+   431→                onClick={onEnterApp}
+   432→                className={`px-4 py-2 rounded-lg border-2 text-sm font-semibold transition-all duration-200 ${
+   433→                  scrolled
+   434→                    ? 'border-white/40 text-white hover:bg-white/10 hover:border-white/60'
+   435→                    : 'border-white/40 text-white hover:bg-white/10 hover:border-white/60'
+   436→                }`}
+   437→              >
+   438→                <span className="flex items-center gap-1.5">
+   439→                  <LogIn className="w-4 h-4" /> Login
+   440→                </span>
+   441→              </motion.button>
+   442→              <motion.button
+   443→                whileHover={shouldReduce ? {} : { scale: 1.03 }}
+   444→                whileTap={{ scale: 0.97 }}
+   445→                onClick={onSignUp}
+   446→                className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all duration-200 hover:brightness-110"
+   447→                style={{ backgroundColor: SAFFRON }}
+   448→              >
+   449→                <span className="flex items-center gap-1.5">
+   450→                  <UserPlus className="w-4 h-4" /> Register
+   451→                </span>
+   452→              </motion.button>
+   453→            </div>
+   454→
+   455→            {/* Mobile Hamburger */}
+   456→            <button
+   457→              className="md:hidden p-2 text-white"
+   458→              onClick={() => setMobileOpen(!mobileOpen)}
+   459→              aria-label={mobileOpen ? 'Close menu' : 'Open menu'}
+   460→              aria-expanded={mobileOpen}
+   461→            >
+   462→              {mobileOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+   463→            </button>
+   464→          </div>
+   465→        </div>
+   466→      </motion.nav>
+   467→
+   468→      {/* Mobile Menu Overlay */}
+   469→      <AnimatePresence>
+   470→        {mobileOpen && (
+   471→          <motion.div
+   472→            initial={{ opacity: 0, x: '100%' }}
+   473→            animate={{ opacity: 1, x: 0 }}
+   474→            exit={{ opacity: 0, x: '100%' }}
+   475→            transition={{ duration: 0.3, ease: 'easeInOut' }}
+   476→            className="fixed inset-0 z-[55] md:hidden"
+   477→          >
+   478→            {/* Backdrop */}
+   479→            <div
+   480→              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+   481→              onClick={() => setMobileOpen(false)}
+   482→            />
+   483→            {/* Slide-in panel */}
+   484→            <motion.div
+   485→              initial={{ x: '100%' }}
+   486→              animate={{ x: 0 }}
+   487→              exit={{ x: '100%' }}
+   488→              transition={{ duration: 0.3, ease: 'easeInOut' }}
+   489→              className="absolute right-0 top-0 bottom-0 w-72 bg-[#0d1030] shadow-2xl flex flex-col"
+   490→              onClick={(e) => e.stopPropagation()}
+   491→            >
+   492→              {/* Mobile menu header */}
+   493→              <div className="flex items-center justify-between p-4 border-b border-white/10">
+   494→                <span className="text-white font-bold text-lg">RailOpt AI</span>
+   495→                <button onClick={() => setMobileOpen(false)} className="p-1 text-white/60 hover:text-white" aria-label="Close menu">
+   496→                  <X className="w-5 h-5" />
+   497→                </button>
+   498→              </div>
+   499→
+   500→              {/* Mobile nav links */}
+   501→              <div className="flex-1 py-4 px-4 space-y-1">
+   502→                {navLinks.map((link) => (
+   503→                  <a
+   504→                    key={link.href}
+   505→                    href={link.href}
+   506→                    onClick={() => setMobileOpen(false)}
+   507→                    className="block py-3 px-3 rounded-lg text-white/80 hover:text-white hover:bg-white/10 font-medium transition-colors"
+   508→                  >
+   509→                    {link.label}
+   510→                  </a>
+   511→                ))}
+   512→              </div>
+   513→
+   514→              {/* Mobile auth buttons */}
+   515→              <div className="p-4 border-t border-white/10 space-y-3">
+   516→                <button
+   517→                  onClick={() => { setMobileOpen(false); onEnterApp() }}
+   518→                  className="w-full py-3 rounded-lg border-2 border-white/40 text-white font-semibold flex items-center justify-center gap-2 hover:bg-white/10 transition-colors"
+   519→                >
+   520→                  <LogIn className="w-4 h-4" /> Login
+   521→                </button>
+   522→                <button
+   523→                  onClick={() => { setMobileOpen(false); onSignUp() }}
+   524→                  className="w-full py-3 rounded-lg text-white font-semibold flex items-center justify-center gap-2 hover:brightness-110 transition-all"
+   525→                  style={{ backgroundColor: SAFFRON }}
+   526→                >
+   527→                  <UserPlus className="w-4 h-4" /> Register
+   528→                </button>
+   529→              </div>
+   530→            </motion.div>
+   531→          </motion.div>
+   532→        )}
+   533→      </AnimatePresence>
+   534→    </>
+   535→  )
+   536→}
+   537→
+   538→/* ═══════════════════════════════════════════════════════
+   539→   SECTION 1: Hero
+   540→   ═══════════════════════════════════════════════════════ */
+   541→function HeroSection({ onEnterApp, onSignUp }: { onEnterApp: () => void; onSignUp: () => void }) {
+   542→  const [showDemo, setShowDemo] = useState(false)
+   543→  const shouldReduce = useReducedMotion()
+   544→
+   545→  const stats = [
+   546→    { value: '12,000+', label: 'km Network', icon: Route },
+   547→    { value: '7,000+', label: 'Stations', icon: MapPin },
+   548→    { value: '2.5 Cr+', label: 'Daily Passengers', icon: Users },
+   549→  ]
+   550→
+   551→  return (
+   552→    <div className="relative min-h-screen flex flex-col overflow-hidden">
+   553→      {/* Animated gradient background */}
+   554→      <motion.div
+   555→        className="absolute inset-0"
+   556→        style={{
+   557→          background: `linear-gradient(135deg, ${NAVY} 0%, ${INDIGO} 50%, #0a0a2e 100%)`,
+   558→        }}
+   559→        animate={
+   560→          shouldReduce
+   561→            ? {}
+   562→            : {
+   563→                background: [
+   564→                  `linear-gradient(135deg, ${NAVY} 0%, ${INDIGO} 50%, #0a0a2e 100%)`,
+   565→                  `linear-gradient(135deg, ${INDIGO} 0%, #0a0a2e 50%, ${NAVY} 100%)`,
+   566→                  `linear-gradient(135deg, #0a0a2e 0%, ${NAVY} 50%, ${INDIGO} 100%)`,
+   567→                  `linear-gradient(135deg, ${NAVY} 0%, ${INDIGO} 50%, #0a0a2e 100%)`,
+   568→                ],
+   569→              }
+   570→        }
+   571→        transition={{ duration: 12, repeat: Infinity, ease: 'linear' }}
+   572→      />
+   573→
+   574→      <FloatingParticles />
+   575→      <ChakraPattern />
+   576→      <RailwayTrack />
+   577→
+   578→      {/* Tricolor strip at top */}
+   579→      <TricolorStrip className="relative z-10" />
+   580→
+   581→      {/* Government Header */}
+   582→      <div className="relative z-10 text-center py-3 md:py-4">
+   583→        <motion.p
+   584→          initial={{ opacity: 0, y: -10 }}
+   585→          animate={{ opacity: 1, y: 0 }}
+   586→          transition={{ duration: 0.6 }}
+   587→          className="text-white/80 text-xs md:text-sm tracking-widest uppercase"
+   588→        >
+   589→          Government of India / भारत सरकार
+   590→        </motion.p>
+   591→        <motion.p
+   592→          initial={{ opacity: 0, y: -10 }}
+   593→          animate={{ opacity: 1, y: 0 }}
+   594→          transition={{ duration: 0.6, delay: 0.1 }}
+   595→          className="text-white/60 text-xs tracking-wider uppercase mt-0.5"
+   596→        >
+   597→          Ministry of Railways / रेल मंत्रालय
+   598→        </motion.p>
+   599→      </div>
+   600→
+   601→      {/* Main Hero Content */}
+   602→      <div className="relative z-10 flex-1 flex flex-col items-center justify-center px-4 text-center">
+   603→        {/* Logo */}
+   604→        <motion.div
+   605→          initial={{ opacity: 0, scale: 0.8 }}
+   606→          animate={{ opacity: 1, scale: 1 }}
+   607→          transition={{ duration: 0.8, ease: 'easeOut' }}
+   608→          className="mb-6"
+   609→        >
+   610→          <Image
+   611→            src="/logo.png"
+   612→            alt="RailOpt AI Logo"
+   613→            width={80}
+   614→            height={80}
+   615→            className="rounded-xl shadow-lg shadow-black/30"
+   616→            style={{ width: 'auto', height: 'auto', maxWidth: '5rem', maxHeight: '5rem' }}
+   617→            priority
+   618→          />
+   619→        </motion.div>
+   620→
+   621→        {/* Title */}
+   622→        <AnimatedTitle
+   623→          text="RailOpt AI"
+   624→          className="text-5xl md:text-7xl lg:text-8xl font-extrabold text-white tracking-tight mb-4"
+   625→        />
+   626→
+   627→        {/* Subtitle */}
+   628→        <motion.p
+   629→          initial={{ opacity: 0, y: 15 }}
+   630→          animate={{ opacity: 1, y: 0 }}
+   631→          transition={{ duration: 0.6, delay: 0.8 }}
+   632→          className="text-lg md:text-xl lg:text-2xl text-white/80 max-w-3xl mb-8 leading-relaxed"
+   633→        >
+   634→          AI-Powered Block Planning &amp; Optimization for Indian Railways
+   635→        </motion.p>
+   636→
+   637→        {/* CTA Buttons */}
+   638→        <motion.div
+   639→          initial={{ opacity: 0, y: 15 }}
+   640→          animate={{ opacity: 1, y: 0 }}
+   641→          transition={{ duration: 0.6, delay: 1.0 }}
+   642→          className="flex flex-col sm:flex-row gap-4 mb-12"
+   643→        >
+   644→          <ShimmerButton onClick={onEnterApp} className="shadow-lg shadow-[#1a237e]/40">
+   645→            <span className="flex items-center gap-2">
+   646→              <LogIn className="w-5 h-5" /> Login to Dashboard <ArrowRight className="w-5 h-5" />
+   647→            </span>
+   648→          </ShimmerButton>
+   649→          <ShimmerButton variant="outline" onClick={onSignUp}>
+   650→            <span className="flex items-center gap-2">
+   651→              <UserPlus className="w-5 h-5" /> Register Now
+   652→            </span>
+   653→          </ShimmerButton>
+   654→        </motion.div>
+   655→
+   656→        {/* Floating Stats */}
+   657→        <motion.div
+   658→          initial={{ opacity: 0, y: 20 }}
+   659→          animate={{ opacity: 1, y: 0 }}
+   660→          transition={{ duration: 0.6, delay: 1.2 }}
+   661→          className="flex flex-col sm:flex-row gap-4 sm:gap-8"
+   662→        >
+   663→          {stats.map((stat, i) => {
+   664→            const Icon = stat.icon
+   665→            return (
+   666→              <motion.div
+   667→                key={stat.label}
+   668→                initial={{ opacity: 0, scale: 0.9 }}
+   669→                animate={{ opacity: 1, scale: 1 }}
+   670→                transition={{ duration: 0.4, delay: 1.4 + i * 0.15 }}
+   671→                className="flex items-center gap-3 bg-white/10 backdrop-blur-sm rounded-xl px-5 py-3 border border-white/10"
+   672→              >
+   673→                <Icon className="w-5 h-5 text-[#FF9933]" />
+   674→                <div className="text-left">
+   675→                  <p className="text-white font-bold text-lg">{stat.value}</p>
+   676→                  <p className="text-white/60 text-xs">{stat.label}</p>
+   677→                </div>
+   678→              </motion.div>
+   679→            )
+   680→          })}
+   681→        </motion.div>
+   682→      </div>
+   683→
+   684→      {/* Demo Modal */}
+   685→      <AnimatePresence>
+   686→        {showDemo && (
+   687→          <motion.div
+   688→            initial={{ opacity: 0 }}
+   689→            animate={{ opacity: 1 }}
+   690→            exit={{ opacity: 0 }}
+   691→            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+   692→            onClick={() => setShowDemo(false)}
+   693→          >
+   694→            <motion.div
+   695→              initial={{ scale: 0.9, opacity: 0 }}
+   696→              animate={{ scale: 1, opacity: 1 }}
+   697→              exit={{ scale: 0.9, opacity: 0 }}
+   698→              onClick={(e) => e.stopPropagation()}
+   699→              className="bg-white rounded-2xl p-8 max-w-md mx-4 text-center shadow-2xl"
+   700→            >
+   701→              <Play className="w-12 h-12 text-[#1a237e] mx-auto mb-4" />
+   702→              <h3 className="text-xl font-bold text-[#1a237e] mb-2">Demo Coming Soon</h3>
+   703→              <p className="text-gray-500 mb-6">
+   704→                The RailOpt AI demo video is currently in production. Stay tuned for a walkthrough of the optimization workflow.
+   705→              </p>
+   706→              <Button onClick={() => setShowDemo(false)} style={{ backgroundColor: NAVY }} className="text-white">
+   707→                Close
+   708→              </Button>
+   709→            </motion.div>
+   710→          </motion.div>
+   711→        )}
+   712→      </AnimatePresence>
+   713→
+   714→      {/* Scroll indicator */}
+   715→      <motion.div
+   716→        initial={{ opacity: 0 }}
+   717→        animate={{ opacity: 1 }}
+   718→        transition={{ delay: 2 }}
+   719→        className="relative z-10 flex justify-center pb-8"
+   720→      >
+   721→        <motion.div
+   722→          animate={shouldReduce ? {} : { y: [0, 8, 0] }}
+   723→          transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
+   724→          className="w-6 h-10 rounded-full border-2 border-white/30 flex items-start justify-center pt-2"
+   725→        >
+   726→          <div className="w-1 h-2 rounded-full bg-white/50" />
+   727→        </motion.div>
+   728→      </motion.div>
+   729→    </div>
+   730→  )
+   731→}
+   732→
+   733→/* ═══════════════════════════════════════════════════════
+   734→   SECTION 2: Problem Statement
+   735→   ═══════════════════════════════════════════════════════ */
+   736→
+   737→/* Individual pain point card — must be its own component for hooks */
+   738→function PainPointCard({
+   739→  icon: Icon,
+   740→  title,
+   741→  description,
+   742→  stat,
+   743→  suffix,
+   744→  color,
+   745→  delay,
+   746→}: {
+   747→  icon: React.ComponentType<{ className?: string }>
+   748→  title: string
+   749→  description: string
+   750→  stat: number
+   751→  suffix: string
+   752→  color: string
+   753→  delay: number
+   754→}) {
+   755→  return (
+   756→    <motion.div
+   757→      initial={{ opacity: 0, y: 30 }}
+   758→      whileInView={{ opacity: 1, y: 0 }}
+   759→      viewport={{ once: true, margin: '-50px' }}
+   760→      transition={{ duration: 0.5, delay }}
+   761→    >
+   762→      <Card className="h-full border-t-4 hover:shadow-xl transition-shadow duration-300" style={{ borderTopColor: color }}>
+   763→        <CardContent className="p-6">
+   764→          <div className="flex items-center gap-3 mb-4">
+   765→            <div className="p-2 rounded-lg" style={{ backgroundColor: `${color}15` }}>
+   766→              <Icon className="w-6 h-6" style={{ color }} />
+   767→            </div>
+   768→            <h3 className="text-lg font-bold text-gray-900">{title}</h3>
+   769→          </div>
+   770→          <div className="mb-4">
+   771→            <AnimatedCounter
+   772→              end={stat}
+   773→              suffix={suffix}
+   774→              className="text-4xl font-extrabold"
+   775→            />
+   776→          </div>
+   777→          <p className="text-gray-600 leading-relaxed">{description}</p>
+   778→        </CardContent>
+   779→      </Card>
+   780→    </motion.div>
+   781→  )
+   782→}
+   783→
+   784→function ProblemSection() {
+   785→  const painPoints = [
+   786→    {
+   787→      icon: Clock,
+   788→      title: 'Manual Block Planning',
+   789→      description:
+   790→        'Manual block planning takes 4-6 hours per corridor, relying on paper-based processes and phone coordination across departments.',
+   791→      stat: 6,
+   792→      suffix: ' hrs',
+   793→      color: SAFFRON,
+   794→    },
+   795→    {
+   796→      icon: AlertTriangle,
+   797→      title: 'Underutilized Windows',
+   798→      description:
+   799→        '23% of maintenance windows go underutilized due to poor coordination, leading to asset degradation and safety risks.',
+   800→      stat: 23,
+   801→      suffix: '%',
+   802→      color: '#dc2626',
+   803→    },
+   804→    {
+   805→      icon: IndianRupee,
+   806→      title: 'Annual Delay Cost',
+   807→      description:
+   808→        'Train delays cost Indian Railways ₹18,000 Cr annually — a staggering economic impact from suboptimal scheduling.',
+   809→      stat: 18000,
+   810→      suffix: ' Cr',
+   811→      color: NAVY,
+   812→    },
+   813→  ]
+   814→
+   815→  return (
+   816→    <Section id="problem" className="bg-white">
+   817→      <DotGrid />
+   818→      <SectionTitle en="The Challenge" hi="चुनौती" />
+   819→
+   820→      <div className="grid md:grid-cols-3 gap-6 lg:gap-8 relative">
+   821→        {painPoints.map((point, i) => (
+   822→          <PainPointCard
+   823→            key={point.title}
+   824→            icon={point.icon}
+   825→            title={point.title}
+   826→            description={point.description}
+   827→            stat={point.stat}
+   828→            suffix={point.suffix}
+   829→            color={point.color}
+   830→            delay={i * 0.15}
+   831→          />
+   832→        ))}
+   833→      </div>
+   834→    </Section>
+   835→  )
+   836→}
+   837→
+   838→/* ═══════════════════════════════════════════════════════
+   839→   SECTION 3: Solution
+   840→   ═══════════════════════════════════════════════════════ */
+   841→function SolutionSection() {
+   842→  const features = [
+   843→    {
+   844→      icon: Brain,
+   845→      title: 'AI-Driven Block Optimization',
+   846→      desc: 'Reduces planning time by 85% using constraint-satisfaction and genetic algorithms.',
+   847→      badge: '85% faster',
+   848→    },
+   849→    {
+   850→      icon: ShieldCheck,
+   851→      title: 'Real-time Conflict Detection',
+   852→      desc: 'Instant alerts for overlapping blocks, resource conflicts, and safety violations.',
+   853→      badge: 'Instant',
+   854→    },
+   855→    {
+   856→      icon: Users,
+   857→      title: 'Multi-Department Collaboration',
+   858→      desc: 'Unified workspace for Engineering, S&T, Traction, Operations, Mechanical, and Commercial.',
+   859→      badge: '6 departments',
+   860→    },
+   861→    {
+   862→      icon: Wrench,
+   863→      title: 'Predictive Maintenance Scheduling',
+   864→      desc: 'ML-based forecasting of asset health to proactively schedule maintenance windows.',
+   865→      badge: 'Predictive',
+   866→    },
+   867→    {
+   868→      icon: BarChart3,
+   869→      title: 'Asset Utilization Tracking',
+   870→      desc: 'Real-time dashboards tracking track, signal, and rolling stock availability at 87%+.',
+   871→      badge: '87%+ avail',
+   872→    },
+   873→    {
+   874→      icon: CheckCircle2,
+   875→      title: 'Automated Approval Workflows',
+   876→      desc: 'Multi-level digital approval chain replacing physical signature routing across zones.',
+   877→      badge: 'Automated',
+   878→    },
+   879→  ]
+   880→
+   881→  return (
+   882→    <Section id="solution" className="bg-gray-50">
+   883→      <SectionTitle en="The RailOpt AI Solution" hi="समाधान" />
+   884→
+   885→      <div className="grid lg:grid-cols-2 gap-12 items-start">
+   886→        {/* Feature List */}
+   887→        <div className="space-y-4">
+   888→          {features.map((feature, i) => {
+   889→            const Icon = feature.icon
+   890→            return (
+   891→              <motion.div
+   892→                key={feature.title}
+   893→                initial={{ opacity: 0, x: -30 }}
+   894→                whileInView={{ opacity: 1, x: 0 }}
+   895→                viewport={{ once: true, margin: '-30px' }}
+   896→                transition={{ duration: 0.5, delay: i * 0.1 }}
+   897→              >
+   898→                <Card className="hover:shadow-lg transition-all duration-300 hover:border-[#1a237e]/30">
+   899→                  <CardContent className="p-4 flex items-start gap-4">
+   900→                    <div className="p-2.5 rounded-lg bg-[#1a237e]/10 shrink-0">
+   901→                      <Icon className="w-5 h-5 text-[#1a237e]" />
+   902→                    </div>
+   903→                    <div className="flex-1 min-w-0">
+   904→                      <div className="flex items-center gap-2 mb-1 flex-wrap">
+   905→                        <h3 className="font-bold text-gray-900">{feature.title}</h3>
+   906→                        <Badge
+   907→                          variant="secondary"
+   908→                          className="text-xs bg-[#FF9933]/10 text-[#c27300] border-[#FF9933]/20"
+   909→                        >
+   910→                          {feature.badge}
+   911→                        </Badge>
+   912→                      </div>
+   913→                      <p className="text-sm text-gray-600">{feature.desc}</p>
+   914→                    </div>
+   915→                  </CardContent>
+   916→                </Card>
+   917→              </motion.div>
+   918→            )
+   919→          })}
+   920→        </div>
+   921→
+   922→        {/* Animated Dashboard Mockup */}
+   923→        <motion.div
+   924→          initial={{ opacity: 0, x: 30 }}
+   925→          whileInView={{ opacity: 1, x: 0 }}
+   926→          viewport={{ once: true, margin: '-50px' }}
+   927→          transition={{ duration: 0.7 }}
+   928→          className="sticky top-24"
+   929→        >
+   930→          <Card className="overflow-hidden shadow-2xl border-0">
+   931→            {/* Mockup Top Bar */}
+   932→            <div className="h-10 flex items-center gap-2 px-4" style={{ backgroundColor: NAVY }}>
+   933→              <div className="flex gap-1.5">
+   934→                <div className="w-3 h-3 rounded-full bg-red-400" />
+   935→                <div className="w-3 h-3 rounded-full bg-yellow-400" />
+   936→                <div className="w-3 h-3 rounded-full bg-green-400" />
+   937→              </div>
+   938→              <span className="text-white/60 text-xs ml-2">RailOpt AI Dashboard</span>
+   939→            </div>
+   940→            {/* Mockup Content */}
+   941→            <div className="p-4 bg-gray-50 space-y-3">
+   942→              {/* Mock KPI Row */}
+   943→              <div className="grid grid-cols-3 gap-2">
+   944→                {['Blocks Optimized', 'Conflicts Resolved', 'Uptime'].map((label, i) => (
+   945→                  <motion.div
+   946→                    key={label}
+   947→                    initial={{ opacity: 0, y: 10 }}
+   948→                    whileInView={{ opacity: 1, y: 0 }}
+   949→                    viewport={{ once: true }}
+   950→                    transition={{ delay: 0.3 + i * 0.1 }}
+   951→                    className="bg-white rounded-lg p-3 shadow-sm"
+   952→                  >
+   953→                    <p className="text-xs text-gray-500">{label}</p>
+   954→                    <p className="text-lg font-bold text-[#1a237e]">
+   955→                      {['247', '12', '99.7%'][i]}
+   956→                    </p>
+   957→                  </motion.div>
+   958→                ))}
+   959→              </div>
+   960→              {/* Mock Timeline */}
+   961→              <div className="bg-white rounded-lg p-3 shadow-sm">
+   962→                <p className="text-xs text-gray-500 mb-2">Block Timeline — Delhi Division</p>
+   963→                <div className="space-y-1.5">
+   964→                  {['06:00-09:00', '09:30-12:00', '13:00-16:30', '17:00-20:00'].map(
+   965→                    (slot, i) => (
+   966→                      <div key={slot} className="flex items-center gap-2">
+   967→                        <div
+   968→                          className="h-2 rounded-full"
+   969→                          style={{
+   970→                            width: `${65 + i * 8}%`,
+   971→                            backgroundColor:
+   972→                              i === 0
+   973→                                ? SAFFRON
+   974→                                : i === 1
+   975→                                  ? INDIAN_GREEN
+   976→                                  : i === 2
+   977→                                    ? NAVY
+   978→                                    : INDIGO,
+   979→                          }}
+   980→                        />
+   981→                        <span className="text-xs text-gray-400">{slot}</span>
+   982→                      </div>
+   983→                    ),
+   984→                  )}
+   985→                </div>
+   986→              </div>
+   987→              {/* Mock Status */}
+   988→              <div className="flex gap-2">
+   989→                <Badge className="bg-green-100 text-green-700 border-green-200">
+   990→                  <Activity className="w-3 h-3 mr-1" /> Live
+   991→                </Badge>
+   992→                <Badge variant="outline" className="text-gray-500">
+   993→                  Zone: NR
+   994→                </Badge>
+   995→                <Badge variant="outline" className="text-gray-500">
+   996→                  Div: Delhi
+   997→                </Badge>
+   998→              </div>
+   999→            </div>
+  1000→          </Card>
+  1001→        </motion.div>
+  1002→      </div>
+  1003→    </Section>
+  1004→  )
+  1005→}
+  1006→
+  1007→/* ═══════════════════════════════════════════════════════
+  1008→   SECTION 4: Impact / Statistics
+  1009→   ═══════════════════════════════════════════════════════ */
+  1010→
+  1011→/* Individual impact card — own component for hooks */
+  1012→function ImpactCard({
+  1013→  icon: Icon,
+  1014→  value,
+  1015→  prefix,
+  1016→  suffix,
+  1017→  label,
+  1018→  displayOverride,
+  1019→  delay,
+  1020→}: {
+  1021→  icon: React.ComponentType<{ className?: string }>
+  1022→  value: number
+  1023→  prefix?: string
+  1024→  suffix?: string
+  1025→  label: string
+  1026→  displayOverride?: string
+  1027→  delay: number
+  1028→}) {
+  1029→  return (
+  1030→    <motion.div
+  1031→      initial={{ opacity: 0, scale: 0.8 }}
+  1032→      whileInView={{ opacity: 1, scale: 1 }}
+  1033→      viewport={{ once: true, margin: '-30px' }}
+  1034→      transition={{ duration: 0.5, delay }}
+  1035→      className="text-center"
+  1036→    >
+  1037→      <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-5 border border-white/10 hover:bg-white/15 transition-colors">
+  1038→        <Icon className="w-7 h-7 text-[#FF9933] mx-auto mb-3" />
+  1039→        <AnimatedCounter
+  1040→          end={value}
+  1041→          prefix={prefix}
+  1042→          suffix={suffix}
+  1043→          displayOverride={displayOverride}
+  1044→          className="text-3xl md:text-4xl font-extrabold text-white mb-1"
+  1045→          duration={2500}
+  1046→        />
+  1047→        <p className="text-white/60 text-sm">{label}</p>
+  1048→      </div>
+  1049→    </motion.div>
+  1050→  )
+  1051→}
+  1052→
+  1053→function ImpactSection() {
+  1054→  const impacts = [
+  1055→    { value: 85, suffix: '%', label: 'Reduction in Planning Time', icon: Clock },
+  1056→    { value: 2400, prefix: '₹', suffix: ' Cr', label: 'Potential Annual Savings', icon: IndianRupee },
+  1057→    { value: 12, suffix: '', label: 'Zones Covered', icon: Layers },
+  1058→    { value: 18, suffix: '', label: 'Corridors Optimized', icon: Route },
+  1059→    { value: 997, suffix: '', label: 'System Uptime', displayOverride: '99.7%', icon: Gauge },
+  1060→  ]
+  1061→
+  1062→  return (
+  1063→    <section id="impact" className="relative py-16 md:py-24 overflow-hidden scroll-mt-20" style={{ background: `linear-gradient(135deg, ${NAVY}, ${INDIGO}, #0a0a2e)` }}>
+  1064→      <FloatingParticles />
+  1065→      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 relative">
+  1066→        <SectionTitle en="Impact at Scale" hi="प्रभाव" light />
+  1067→
+  1068→        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6">
+  1069→          {impacts.map((item, i) => (
+  1070→            <ImpactCard
+  1071→              key={item.label}
+  1072→              icon={item.icon}
+  1073→              value={item.value}
+  1074→              prefix={item.prefix}
+  1075→              suffix={item.suffix}
+  1076→              label={item.label}
+  1077→              displayOverride={item.displayOverride}
+  1078→              delay={i * 0.1}
+  1079→            />
+  1080→          ))}
+  1081→        </div>
+  1082→      </div>
+  1083→    </section>
+  1084→  )
+  1085→}
+  1086→
+  1087→/* ═══════════════════════════════════════════════════════
+  1088→   SECTION 5: How It Works
+  1089→   ═══════════════════════════════════════════════════════ */
+  1090→function HowItWorksSection() {
+  1091→  const steps = [
+  1092→    {
+  1093→      num: 1,
+  1094→      icon: Database,
+  1095→      title: 'Data Collection',
+  1096→      desc: 'Real-time data from CRIS, FOIS, COA and other railway systems feeds into the platform.',
+  1097→      color: SAFFRON,
+  1098→    },
+  1099→    {
+  1100→      num: 2,
+  1101→      icon: Cpu,
+  1102→      title: 'AI Analysis',
+  1103→      desc: 'ML models analyze constraints, resource availability, and detect potential conflicts.',
+  1104→      color: NAVY,
+  1105→    },
+  1106→    {
+  1107→      num: 3,
+  1108→      icon: Zap,
+  1109→      title: 'Optimization',
+  1110→      desc: 'Genetic algorithm with constraint satisfaction finds the optimal block plan in minutes.',
+  1111→      color: INDIAN_GREEN,
+  1112→    },
+  1113→    {
+  1114→      num: 4,
+  1115→      icon: CheckCircle2,
+  1116→      title: 'Deployment',
+  1117→      desc: 'Optimized plan deployed through automated multi-level approval workflow to all departments.',
+  1118→      color: INDIGO,
+  1119→    },
+  1120→  ]
+  1121→
+  1122→  return (
+  1123→    <Section id="how-it-works" className="bg-white">
+  1124→      <SectionTitle en="How It Works" hi="कैसे काम करता है" />
+  1125→
+  1126→      <div className="relative">
+  1127→        {/* Connecting line */}
+  1128→        <div className="hidden md:block absolute top-16 left-[12.5%] right-[12.5%] h-0.5 bg-gray-200" aria-hidden="true">
+  1129→          <motion.div
+  1130→            className="h-full bg-gradient-to-r from-[#FF9933] via-[#1a237e] to-[#138808]"
+  1131→            initial={{ width: '0%' }}
+  1132→            whileInView={{ width: '100%' }}
+  1133→            viewport={{ once: true }}
+  1134→            transition={{ duration: 1.5, ease: 'easeInOut' }}
+  1135→          />
+  1136→        </div>
+  1137→
+  1138→        <div className="grid md:grid-cols-4 gap-8">
+  1139→          {steps.map((step, i) => {
+  1140→            const Icon = step.icon
+  1141→            return (
+  1142→              <motion.div
+  1143→                key={step.num}
+  1144→                initial={{ opacity: 0, y: 30 }}
+  1145→                whileInView={{ opacity: 1, y: 0 }}
+  1146→                viewport={{ once: true, margin: '-30px' }}
+  1147→                transition={{ duration: 0.5, delay: i * 0.2 }}
+  1148→                className="text-center relative"
+  1149→              >
+  1150→                <div className="flex justify-center mb-6">
+  1151→                  <motion.div
+  1152→                    whileHover={{ scale: 1.1 }}
+  1153→                    className="relative w-16 h-16 rounded-full flex items-center justify-center shadow-lg"
+  1154→                    style={{ backgroundColor: step.color }}
+  1155→                  >
+  1156→                    <Icon className="w-7 h-7 text-white" />
+  1157→                    <span
+  1158→                      className="absolute -top-2 -right-2 w-7 h-7 rounded-full bg-white shadow-md flex items-center justify-center text-xs font-bold"
+  1159→                      style={{ color: step.color }}
+  1160→                    >
+  1161→                      {step.num}
+  1162→                    </span>
+  1163→                  </motion.div>
+  1164→                </div>
+  1165→                <h3 className="text-lg font-bold text-gray-900 mb-2">{step.title}</h3>
+  1166→                <p className="text-sm text-gray-600 leading-relaxed">{step.desc}</p>
+  1167→              </motion.div>
+  1168→            )
+  1169→          })}
+  1170→        </div>
+  1171→      </div>
+  1172→    </Section>
+  1173→  )
+  1174→}
+  1175→
+  1176→/* ═══════════════════════════════════════════════════════
+  1177→   SECTION 6: Technology Stack
+  1178→   ═══════════════════════════════════════════════════════ */
+  1179→function TechStackSection() {
+  1180→  const techs = [
+  1181→    { icon: Globe, title: 'Next.js 16', desc: 'Modern SSR frontend with App Router', color: NAVY },
+  1182→    { icon: Brain, title: 'AI/ML Engine', desc: 'Optimization & conflict detection', color: SAFFRON },
+  1183→    { icon: Wifi, title: 'Real-time Sync', desc: 'WebSocket-based live updates', color: INDIAN_GREEN },
+  1184→    { icon: Lock, title: 'Role-Based Access', desc: '6 distinct department roles', color: INDIGO },
+  1185→    { icon: WifiOff, title: 'Offline Support', desc: 'PWA with service worker cache', color: '#6b21a8' },
+  1186→    { icon: Accessibility, title: 'WCAG 2.2 AA', desc: 'Fully accessible interface', color: '#b91c1c' },
+  1187→  ]
+  1188→
+  1189→  return (
+  1190→    <Section id="tech" className="bg-gray-50">
+  1191→      <SectionTitle en="Powered By" hi="प्रौद्योगिकी" />
+  1192→
+  1193→      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 lg:gap-6">
+  1194→        {techs.map((tech, i) => {
+  1195→          const Icon = tech.icon
+  1196→          return (
+  1197→            <motion.div
+  1198→              key={tech.title}
+  1199→              initial={{ opacity: 0, y: 20 }}
+  1200→              whileInView={{ opacity: 1, y: 0 }}
+  1201→              viewport={{ once: true, margin: '-20px' }}
+  1202→              transition={{ duration: 0.4, delay: i * 0.08 }}
+  1203→              whileHover={{ y: -4, transition: { duration: 0.2 } }}
+  1204→            >
+  1205→              <Card className="h-full text-center hover:shadow-lg transition-shadow duration-300 border-t-2" style={{ borderTopColor: tech.color }}>
+  1206→                <CardContent className="p-5">
+  1207→                  <div className="mx-auto mb-3 w-12 h-12 rounded-xl flex items-center justify-center" style={{ backgroundColor: `${tech.color}12` }}>
+  1208→                    <Icon className="w-6 h-6" style={{ color: tech.color }} />
+  1209→                  </div>
+  1210→                  <h3 className="font-bold text-gray-900 mb-1">{tech.title}</h3>
+  1211→                  <p className="text-sm text-gray-500">{tech.desc}</p>
+  1212→                </CardContent>
+  1213→              </Card>
+  1214→            </motion.div>
+  1215→          )
+  1216→        })}
+  1217→      </div>
+  1218→    </Section>
+  1219→  )
+  1220→}
+  1221→
+  1222→/* ═══════════════════════════════════════════════════════
+  1223→   SECTION 7: Zones & Corridors
+  1224→   ═══════════════════════════════════════════════════════ */
+  1225→function ZonesSection() {
+  1226→  const zones = [
+  1227→    { code: 'NR', name: 'Northern', color: SAFFRON },
+  1228→    { code: 'NER', name: 'North Eastern', color: '#b91c1c' },
+  1229→    { code: 'NCR', name: 'North Central', color: NAVY },
+  1230→    { code: 'ER', name: 'Eastern', color: INDIAN_GREEN },
+  1231→    { code: 'SER', name: 'South Eastern', color: INDIGO },
+  1232→    { code: 'SCR', name: 'South Central', color: '#6b21a8' },
+  1233→    { code: 'CR', name: 'Central', color: SAFFRON },
+  1234→    { code: 'WR', name: 'Western', color: '#0369a1' },
+  1235→    { code: 'SR', name: 'Southern', color: INDIAN_GREEN },
+  1236→    { code: 'SWR', name: 'South Western', color: '#b91c1c' },
+  1237→    { code: 'NFR', name: 'North Frontier', color: NAVY },
+  1238→    { code: 'SECR', name: 'South East Central', color: INDIGO },
+  1239→  ]
+  1240→
+  1241→  const corridors = [
+  1242→    'Delhi–Howrah (Grand Chord)',
+  1243→    'Delhi–Mumbai (Western DFC)',
+  1244→    'Delhi–Chennai (Grand Trunk)',
+  1245→    'Howrah–Mumbai (via Nagpur)',
+  1246→    'Mumbai–Chennai (via Bangalore)',
+  1247→    'Delhi–Guwahati (NE Frontier)',
+  1248→  ]
+  1249→
+  1250→  return (
+  1251→    <Section id="coverage" className="bg-white">
+  1252→      <SectionTitle en="Coverage" hi="कवरेज" />
+  1253→
+  1254→      <div className="grid lg:grid-cols-2 gap-12">
+  1255→        {/* Zones */}
+  1256→        <div>
+  1257→          <h3 className="text-xl font-bold text-[#1a237e] mb-4 flex items-center gap-2">
+  1258→            <Layers className="w-5 h-5" /> Railway Zones
+  1259→          </h3>
+  1260→          <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
+  1261→            {zones.map((zone, i) => (
+  1262→              <motion.div
+  1263→                key={zone.code}
+  1264→                initial={{ opacity: 0, scale: 0.8 }}
+  1265→                whileInView={{ opacity: 1, scale: 1 }}
+  1266→                viewport={{ once: true }}
+  1267→                transition={{ duration: 0.3, delay: i * 0.04 }}
+  1268→                whileHover={{ scale: 1.05, transition: { duration: 0.15 } }}
+  1269→              >
+  1270→                <Card className="cursor-default hover:shadow-md transition-shadow">
+  1271→                  <CardContent className="p-3 text-center">
+  1272→                    <span
+  1273→                      className="inline-block text-lg font-extrabold mb-0.5"
+  1274→                      style={{ color: zone.color }}
+  1275→                    >
+  1276→                      {zone.code}
+  1277→                    </span>
+  1278→                    <p className="text-xs text-gray-500 leading-tight">{zone.name}</p>
+  1279→                  </CardContent>
+  1280→                </Card>
+  1281→              </motion.div>
+  1282→            ))}
+  1283→          </div>
+  1284→        </div>
+  1285→
+  1286→        {/* Corridors */}
+  1287→        <div>
+  1288→          <h3 className="text-xl font-bold text-[#1a237e] mb-4 flex items-center gap-2">
+  1289→            <Cable className="w-5 h-5" /> Key Corridors
+  1290→          </h3>
+  1291→          <div className="space-y-3">
+  1292→            {corridors.map((corridor, i) => (
+  1293→              <motion.div
+  1294→                key={corridor}
+  1295→                initial={{ opacity: 0, x: 20 }}
+  1296→                whileInView={{ opacity: 1, x: 0 }}
+  1297→                viewport={{ once: true }}
+  1298→                transition={{ duration: 0.4, delay: i * 0.08 }}
+  1299→              >
+  1300→                <Card className="hover:shadow-md transition-shadow">
+  1301→                  <CardContent className="p-3 flex items-center gap-3">
+  1302→                    <div
+  1303→                      className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0"
+  1304→                      style={{ backgroundColor: i % 2 === 0 ? NAVY : INDIAN_GREEN }}
+  1305→                    >
+  1306→                      {i + 1}
+  1307→                    </div>
+  1308→                    <span className="text-sm font-medium text-gray-800">{corridor}</span>
+  1309→                    <ChevronRight className="w-4 h-4 text-gray-400 ml-auto" />
+  1310→                  </CardContent>
+  1311→                </Card>
+  1312→              </motion.div>
+  1313→            ))}
+  1314→          </div>
+  1315→        </div>
+  1316→      </div>
+  1317→    </Section>
+  1318→  )
+  1319→}
+  1320→
+  1321→/* ═══════════════════════════════════════════════════════
+  1322→   SECTION 8: CTA
+  1323→   ═══════════════════════════════════════════════════════ */
+  1324→function CTASection({ onEnterApp, onSignUp }: { onEnterApp: () => void; onSignUp: () => void }) {
+  1325→  return (
+  1326→    <section
+  1327→      id="cta"
+  1328→      className="relative py-20 md:py-28 overflow-hidden scroll-mt-20"
+  1329→      style={{
+  1330→        background: `linear-gradient(135deg, ${SAFFRON}22, white, ${INDIAN_GREEN}22)`,
+  1331→      }}
+  1332→    >
+  1333→      {/* Tricolor gradient bar top */}
+  1334→      <TricolorStrip className="absolute top-0 left-0 right-0" />
+  1335→
+  1336→      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 text-center relative">
+  1337→        <motion.div
+  1338→          initial={{ opacity: 0, y: 20 }}
+  1339→          whileInView={{ opacity: 1, y: 0 }}
+  1340→          viewport={{ once: true }}
+  1341→          transition={{ duration: 0.6 }}
+  1342→        >
+  1343→          <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold text-[#1a237e] mb-3">
+  1344→            Ready to Optimize?
+  1345→          </h2>
+  1346→          <p className="text-lg text-gray-500 mb-2">अनुकूलन शुरू करें</p>
+  1347→          <p className="text-sm text-gray-400 mb-8 max-w-xl mx-auto">
+  1348→            Authorized personnel only — Ministry of Railways, Government of India
+  1349→          </p>
+  1350→
+  1351→          <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
+  1352→            <ShimmerButton onClick={onEnterApp} className="px-10 py-4 text-xl shadow-xl shadow-[#1a237e]/30">
+  1353→              <span className="flex items-center gap-3">
+  1354→                <LogIn className="w-6 h-6" />
+  1355→                Login to Dashboard
+  1356→                <ArrowRight className="w-6 h-6" />
+  1357→              </span>
+  1358→            </ShimmerButton>
+  1359→            <ShimmerButton variant="outline" onClick={onSignUp} className="px-10 py-4 text-xl">
+  1360→              <span className="flex items-center gap-3">
+  1361→                <UserPlus className="w-6 h-6" />
+  1362→                Register Now
+  1363→              </span>
+  1364→            </ShimmerButton>
+  1365→          </div>
+  1366→        </motion.div>
+  1367→      </div>
+  1368→    </section>
+  1369→  )
+  1370→}
+  1371→
+  1372→/* ═══════════════════════════════════════════════════════
+  1373→   SECTION 9: Footer
+  1374→   ═══════════════════════════════════════════════════════ */
+  1375→function Footer() {
+  1376→  const links = ['Terms of Use', 'Privacy Policy', 'Accessibility Statement', 'Sitemap']
+  1377→
+  1378→  return (
+  1379→    <footer className="bg-[#0a0a1a] text-white/70 print:hidden">
+  1380→      <TricolorStrip />
+  1381→
+  1382→      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
+  1383→        <div className="grid md:grid-cols-3 gap-8 mb-8">
+  1384→          {/* Government Info */}
+  1385→          <div>
+  1386→            <p className="text-white font-semibold mb-1">Government of India</p>
+  1387→            <p className="text-sm">भारत सरकार</p>
+  1388→            <p className="text-sm mt-2">Ministry of Railways / रेल मंत्रालय</p>
+  1389→            <p className="text-sm text-white/50 mt-1">Rail Bhawan, New Delhi — 110001</p>
+  1390→          </div>
+  1391→
+  1392→          {/* Credits */}
+  1393→          <div>
+  1394→            <p className="text-white font-semibold mb-1">Technical Partner</p>
+  1395→            <p className="text-sm">CRIS — Centre for Railway Information Systems</p>
+  1396→            <p className="text-sm text-white/50 mt-1">Designed &amp; Developed by NIC / CRIS</p>
+  1397→          </div>
+  1398→
+  1399→          {/* Legal Links */}
+  1400→          <div>
+  1401→            <p className="text-white font-semibold mb-2">Legal</p>
+  1402→            <div className="flex flex-wrap gap-x-4 gap-y-1">
+  1403→              {links.map((link) => (
+  1404→                <button
+  1405→                  key={link}
+  1406→                  className="text-sm hover:text-white transition-colors underline-offset-4 hover:underline"
+  1407→                >
+  1408→                  {link}
+  1409→                </button>
+  1410→              ))}
+  1411→            </div>
+  1412→          </div>
+  1413→        </div>
+  1414→
+  1415→        <div className="border-t border-white/10 pt-6 flex flex-col md:flex-row justify-between items-center gap-4">
+  1416→          <p className="text-sm text-white/40">
+  1417→            © {new Date().getFullYear()} Ministry of Railways, Government of India. All rights reserved.
+  1418→          </p>
+  1419→          <p className="text-sm text-white/40">
+  1420→            Made with ❤️ for Indian Railways
+  1421→          </p>
+  1422→        </div>
+  1423→      </div>
+  1424→
+  1425→      <TricolorStrip />
+  1426→    </footer>
+  1427→  )
+  1428→}
+  1429→
+  1430→/* ═══════════════════════════════════════════════════════
+  1431→   MAIN COMPONENT
+  1432→   ═══════════════════════════════════════════════════════ */
+  1433→export function LandingPage({ onEnterApp, onSignUp }: { onEnterApp: () => void; onSignUp: () => void }) {
+  1434→  return (
+  1435→    <div className="min-h-screen flex flex-col">
+  1436→      <StickyNavBar onEnterApp={onEnterApp} onSignUp={onSignUp} />
+  1437→      <main className="flex-1">
+  1438→        <HeroSection onEnterApp={onEnterApp} onSignUp={onSignUp} />
+  1439→        <ProblemSection />
+  1440→        <SolutionSection />
+  1441→        <ImpactSection />
+  1442→        <HowItWorksSection />
+  1443→        <TechStackSection />
+  1444→        <ZonesSection />
+  1445→        <CTASection onEnterApp={onEnterApp} onSignUp={onSignUp} />
+  1446→      </main>
+  1447→      <Footer />
+  1448→    </div>
+  1449→  )
+  1450→}
+  1451→
