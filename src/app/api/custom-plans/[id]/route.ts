@@ -1,6 +1,7 @@
 import { db } from '@/lib/db'
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth, requireRole } from '@/lib/auth-guard'
+import { logAudit } from '@/lib/audit'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -44,6 +45,34 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     if (typeof body?.endDate === 'string') data.endDate = body.endDate
 
     const plan = await db.customPlan.update({ where: { id }, data })
+
+    // Audit: distinguish block link/unlink from generic field updates
+    if (typeof body?.addBlockId === 'string') {
+      void logAudit(session, {
+        action: 'BLOCK_ADDED_TO_PLAN',
+        entityType: 'plan',
+        entityId: plan.id,
+        details: `Block ${body.addBlockId} linked to plan "${plan.name}" (${JSON.parse(plan.blockIds || '[]').length} blocks total)`,
+      })
+    } else if (typeof body?.removeBlockId === 'string') {
+      void logAudit(session, {
+        action: 'BLOCK_REMOVED_FROM_PLAN',
+        entityType: 'plan',
+        entityId: plan.id,
+        details: `Block ${body.removeBlockId} unlinked from plan "${plan.name}"`,
+      })
+    } else {
+      const changed = Object.keys(data)
+      if (changed.length > 0) {
+        void logAudit(session, {
+          action: 'CUSTOM_PLAN_UPDATED',
+          entityType: 'plan',
+          entityId: plan.id,
+          details: `Updated plan "${plan.name}" — fields: ${changed.join(', ')}`,
+        })
+      }
+    }
+
     return NextResponse.json({ data: { ...plan, blockIds: JSON.parse(plan.blockIds || '[]'), isCustom: true } })
   } catch (error) {
     console.error('CustomPlans PATCH error:', error)
@@ -65,6 +94,13 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
     // Also unlink manual blocks pointing at this plan
     await db.manualBlock.updateMany({ where: { planId: id }, data: { planId: null } })
     await db.customPlan.delete({ where: { id } })
+
+    void logAudit(session, {
+      action: 'CUSTOM_PLAN_DELETED',
+      entityType: 'plan',
+      entityId: id,
+      details: `Deleted custom plan "${existing.name}" (${existing.startDate} → ${existing.endDate}, ${JSON.parse(existing.blockIds || '[]').length} blocks; linked manual blocks unlinked)`,
+    })
 
     return NextResponse.json({ data: { id } })
   } catch (error) {

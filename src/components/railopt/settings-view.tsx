@@ -71,6 +71,10 @@ import {
   LogOut,
   Search,
   Users,
+  Database,
+  HardDrive,
+  Trash2,
+  Loader2,
 } from 'lucide-react'
 
 const USERS = [
@@ -186,11 +190,13 @@ export function SettingsView() {
   // ─── User management state ───
   const [userOverrides, setUserOverrides] = useState<Record<string, UserOverride>>({})
   const [invitedUsers, setInvitedUsers] = useState<ManagedUser[]>([])
+  const [usersSynced, setUsersSynced] = useState<null | 'connected' | 'device' | 'checking'>(null)
   const [inviteOpen, setInviteOpen] = useState(false)
   const [inviteName, setInviteName] = useState('')
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteRole, setInviteRole] = useState('engineering')
   const [inviteDept, setInviteDept] = useState('Engineering')
+  const [inviteSubmitting, setInviteSubmitting] = useState(false)
   const [userSearch, setUserSearch] = useState('')
   const [userRoleFilter, setUserRoleFilter] = useState('all')
 
@@ -209,6 +215,22 @@ export function SettingsView() {
       } catch {
         // ignore malformed persisted data
       }
+
+      // Durable hydration: server DB is the source of truth for invited users.
+      // localStorage stays as instant cache + offline fallback.
+      fetch('/api/users', { cache: 'no-store' })
+        .then(async (res) => {
+          if (!res.ok) {
+            setUsersSynced('device')
+            return
+          }
+          const json = await res.json()
+          const rows = Array.isArray(json?.data) ? (json.data as ManagedUser[]) : []
+          setInvitedUsers(rows)
+          setUsersSynced('connected')
+          try { localStorage.setItem(INVITED_USERS_KEY, JSON.stringify(rows)) } catch { /* noop */ }
+        })
+        .catch(() => setUsersSynced((prev) => prev ?? 'device'))
     }, 0)
     return () => clearTimeout(t)
   }, [])
@@ -235,6 +257,17 @@ export function SettingsView() {
 
   const handleRoleChange = (userId: string, userName: string, role: string) => {
     persistOverrides({ ...userOverrides, [userId]: { ...userOverrides[userId], role } })
+    // Invited users are durable DB rows — write the role change through
+    const invited = invitedUsers.find((u) => u.id === userId)
+    if (invited) {
+      void fetch(`/api/users/${encodeURIComponent(userId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role }),
+      }).then((res) => {
+        if (res.ok) setUsersSynced('connected')
+      }).catch(() => { /* offline — local override already applied */ })
+    }
     toast.success(`${userName} is now ${ROLE_LABELS[role] ?? role}`, {
       description: 'Role change takes effect on their next sign-in.',
     })
@@ -243,6 +276,17 @@ export function SettingsView() {
   const handleToggleStatus = (userId: string, userName: string, current: string) => {
     const next = current === 'active' ? 'inactive' : 'active'
     persistOverrides({ ...userOverrides, [userId]: { ...userOverrides[userId], status: next } })
+    // Invited users are durable DB rows — write the status change through
+    const invited = invitedUsers.find((u) => u.id === userId)
+    if (invited) {
+      void fetch(`/api/users/${encodeURIComponent(userId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isActive: next === 'active' }),
+      }).then((res) => {
+        if (res.ok) setUsersSynced('connected')
+      }).catch(() => { /* offline — local override already applied */ })
+    }
     if (next === 'inactive') {
       toast.warning(`${userName} deactivated`, { description: 'Their access will be suspended on next sign-in.' })
     } else {
@@ -250,7 +294,24 @@ export function SettingsView() {
     }
   }
 
-  const handleInviteUser = () => {
+  const handleRemoveInvited = (userId: string, userName: string) => {
+    const next = invitedUsers.filter((u) => u.id !== userId)
+    setInvitedUsers(next)
+    try { localStorage.setItem(INVITED_USERS_KEY, JSON.stringify(next)) } catch { /* noop */ }
+    // Also drop any local overrides for this user
+    if (userOverrides[userId]) {
+      const { [userId]: _drop, ...rest } = userOverrides
+      persistOverrides(rest)
+    }
+    void fetch(`/api/users/${encodeURIComponent(userId)}`, { method: 'DELETE' })
+      .then((res) => {
+        if (res.ok) setUsersSynced('connected')
+      })
+      .catch(() => { /* offline — local removal already applied */ })
+    toast.success(`${userName} removed`, { description: 'Their access was revoked and the record deleted.' })
+  }
+
+  const handleInviteUser = async () => {
     const name = inviteName.trim()
     const email = inviteEmail.trim().toLowerCase()
     if (!name || !email) {
@@ -265,7 +326,9 @@ export function SettingsView() {
       toast.error('A user with this email already exists')
       return
     }
-    const user: ManagedUser = {
+    setInviteSubmitting(true)
+    // Optimistic local add (instant, works offline)
+    const localUser: ManagedUser = {
       id: `invited-${Date.now()}`,
       name,
       email,
@@ -274,15 +337,52 @@ export function SettingsView() {
       status: 'active',
       invited: true,
     }
-    const next = [user, ...invitedUsers]
+    const next = [localUser, ...invitedUsers]
     setInvitedUsers(next)
     try { localStorage.setItem(INVITED_USERS_KEY, JSON.stringify(next)) } catch { /* noop */ }
     setInviteOpen(false)
     setInviteName('')
     setInviteEmail('')
-    toast.success(`Invitation sent to ${name}`, {
-      description: `${email} · ${ROLE_LABELS[inviteRole] ?? inviteRole} · on first sign-in they set a password.`,
-    })
+
+    // Durable write-through: replace the optimistic row with the server record
+    try {
+      const res = await fetch('/api/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, email, role: inviteRole, department: inviteDept }),
+      })
+      const json = await res.json().catch(() => null)
+      if (res.ok && json?.data) {
+        const saved = json.data as ManagedUser
+        setInvitedUsers((prev) => {
+          const withSaved = prev.map((u) => (u.id === localUser.id ? saved : u))
+          try { localStorage.setItem(INVITED_USERS_KEY, JSON.stringify(withSaved)) } catch { /* noop */ }
+          return withSaved
+        })
+        setUsersSynced('connected')
+        toast.success(`Invitation sent to ${name}`, {
+          description: `${email} · ${ROLE_LABELS[inviteRole] ?? inviteRole} · saved to the server — visible on any browser.`,
+        })
+      } else if (res.status === 409) {
+        // Already exists on the server — refresh from DB to reconcile
+        setInvitedUsers((prev) => prev.filter((u) => u.id !== localUser.id))
+        toast.error('A user with this email already exists', {
+          description: typeof json?.error === 'string' ? json.error : undefined,
+        })
+      } else {
+        setUsersSynced((s) => s ?? 'device')
+        toast.warning('Saved on this device only', {
+          description: 'The server did not confirm the invitation — it will stay local for now.',
+        })
+      }
+    } catch {
+      setUsersSynced((s) => s ?? 'device')
+      toast.warning('Saved on this device only', {
+        description: 'Server unreachable — the invitation stays local for now.',
+      })
+    } finally {
+      setInviteSubmitting(false)
+    }
   }
 
   const deptRequestCounts = departmentSummary.map(d => ({
@@ -796,11 +896,29 @@ export function SettingsView() {
                   <Card>
                     <CardHeader className="pb-3">
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                        <div>
+                        <div className="flex-1 min-w-0">
                           <CardTitle className="text-sm">User Management</CardTitle>
                           <CardDescription className="text-xs">{managedUsers.length} users · manage roles and access</CardDescription>
                         </div>
-                        <Button size="sm" className="h-8 text-xs gap-1.5 shrink-0" onClick={() => setInviteOpen(true)}>
+                        {usersSynced === 'connected' && (
+                          <span
+                            className="hidden md:flex items-center gap-1.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400 mr-auto"
+                            title="Invited users are saved to the server database and available on any browser"
+                          >
+                            <Database className="w-3 h-3" />
+                            Cloud-synced
+                          </span>
+                        )}
+                        {usersSynced === 'device' && (
+                          <span
+                            className="hidden md:flex items-center gap-1.5 text-[10px] font-medium text-amber-600 dark:text-amber-400 mr-auto"
+                            title="Server unavailable — invited users are stored on this device only"
+                          >
+                            <HardDrive className="w-3 h-3" />
+                            Device-only
+                          </span>
+                        )}
+                        <Button size="sm" className="h-8 text-xs gap-1.5 shrink-0" onClick={() => setInviteOpen(true)} disabled={inviteSubmitting}>
                           <UserPlus className="w-3.5 h-3.5" />
                           Invite User
                         </Button>
@@ -934,6 +1052,18 @@ export function SettingsView() {
                                           </>
                                         )}
                                       </DropdownMenuItem>
+                                      {user.invited && (
+                                        <>
+                                          <DropdownMenuSeparator />
+                                          <DropdownMenuItem
+                                            className="text-xs gap-2 focus:text-red-600 dark:focus:text-red-400"
+                                            onClick={() => handleRemoveInvited(user.id, user.name)}
+                                          >
+                                            <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                                            <span className="text-red-600 dark:text-red-400">Remove user</span>
+                                          </DropdownMenuItem>
+                                        </>
+                                      )}
                                     </DropdownMenuContent>
                                   </DropdownMenu>
                                 </TableCell>
@@ -944,8 +1074,21 @@ export function SettingsView() {
                       </div>
                     </CardContent>
                     <CardFooter className="pt-2 justify-between">
-                      <span className="text-[10px] text-muted-foreground">
-                        Showing {visibleUsers.length} of {managedUsers.length} users · changes persist on this device
+                      <span className="text-[10px] text-muted-foreground flex items-center gap-1.5">
+                        Showing {visibleUsers.length} of {managedUsers.length} users
+                        {usersSynced === 'connected' ? (
+                          <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+                            <Database className="w-3 h-3" />
+                            · invited users saved to the server
+                          </span>
+                        ) : usersSynced === 'device' ? (
+                          <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
+                            <HardDrive className="w-3 h-3" />
+                            · changes persist on this device only
+                          </span>
+                        ) : (
+                          ' · changes persist on this device'
+                        )}
                       </span>
                       <Button size="sm" className="h-8 text-xs gap-1.5" onClick={() => handleSave('User')}>
                         <Save className="w-3.5 h-3.5" />
@@ -1389,10 +1532,19 @@ export function SettingsView() {
             </div>
           </div>
           <DialogFooter className="gap-2">
-            <Button variant="outline" size="sm" onClick={() => setInviteOpen(false)}>Cancel</Button>
-            <Button size="sm" onClick={handleInviteUser} className="gap-1.5">
-              <UserPlus className="h-3.5 w-3.5" />
-              Send Invite
+            <Button variant="outline" size="sm" onClick={() => setInviteOpen(false)} disabled={inviteSubmitting}>Cancel</Button>
+            <Button size="sm" onClick={handleInviteUser} className="gap-1.5" disabled={inviteSubmitting}>
+              {inviteSubmitting ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Saving…
+                </>
+              ) : (
+                <>
+                  <UserPlus className="h-3.5 w-3.5" />
+                  Send Invite
+                </>
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

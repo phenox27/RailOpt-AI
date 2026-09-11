@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState, useCallback } from 'react'
+import { useMemo, useState, useCallback, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Table,
@@ -21,13 +21,41 @@ import {
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { auditEntries, type SimAuditEntry } from '@/data/simulated-data'
-import { ScrollText, Filter, ArrowUpDown, Search, Download, ChevronDown, ChevronRight, CalendarRange } from 'lucide-react'
+import { ScrollText, Filter, ArrowUpDown, Search, Download, ChevronDown, ChevronRight, CalendarRange, Radio } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import { EmptyState } from './empty-state'
 
 type ActionFilter = 'all' | string
 type EntityTypeFilter = 'all' | string
 type SortOrder = 'desc' | 'asc'
+
+/** Raw audit row returned by GET /api/audit (Prisma AuditLog include user). */
+interface DbAuditEntry {
+  id: string
+  action: string
+  entityType: string
+  entityId: string | null
+  userName: string | null
+  details: string | null
+  createdAt: string
+  user?: { name?: string; email?: string } | null
+}
+
+/** Merged view-model: simulated entries + live DB entries (tagged isLive). */
+type MergedAuditEntry = SimAuditEntry & { isLive?: boolean }
+
+function mapDbEntry(e: DbAuditEntry): MergedAuditEntry {
+  return {
+    id: `db-${e.id}`,
+    action: e.action,
+    entityType: e.entityType,
+    entityId: e.entityId ?? '—',
+    userName: e.userName ?? e.user?.name ?? 'System',
+    details: e.details ?? '(no details)',
+    timestamp: e.createdAt,
+    isLive: true,
+  }
+}
 
 const ACTION_BADGE: Record<string, string> = {
   RUN_OPTIMIZATION: 'bg-[#e8eaf6] text-[#0d47a1] border-[#9fa8da] dark:bg-[#1a237e]/30 dark:text-[#7986cb] dark:border-[#3f51b5]/50',
@@ -36,6 +64,17 @@ const ACTION_BADGE: Record<string, string> = {
   BLOCK_RECOMMENDED: 'bg-[#e8eaf6] text-[#0d47a1] border-[#9fa8da] dark:bg-[#1a237e]/30 dark:text-[#7986cb] dark:border-[#3f51b5]/50',
   CONFLICT_DETECTED: 'bg-red-50 text-red-700 border-red-200 dark:bg-red-950/30 dark:text-red-400 dark:border-red-800/50',
   PLAN_REVIEWED: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-400 dark:border-emerald-800/50',
+  // Live plan/block/user actions (saffron family = create, red = delete, neutral = update)
+  CUSTOM_PLAN_CREATED: 'bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/30 dark:text-orange-400 dark:border-orange-800/50',
+  CUSTOM_PLAN_UPDATED: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/30 dark:text-amber-400 dark:border-amber-800/50',
+  CUSTOM_PLAN_DELETED: 'bg-red-50 text-red-700 border-red-200 dark:bg-red-950/30 dark:text-red-400 dark:border-red-800/50',
+  BLOCK_ADDED_TO_PLAN: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-400 dark:border-emerald-800/50',
+  BLOCK_REMOVED_FROM_PLAN: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/30 dark:text-amber-400 dark:border-amber-800/50',
+  MANUAL_BLOCK_CREATED: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-400 dark:border-emerald-800/50',
+  MANUAL_BLOCK_DELETED: 'bg-red-50 text-red-700 border-red-200 dark:bg-red-950/30 dark:text-red-400 dark:border-red-800/50',
+  USER_INVITED: 'bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-950/30 dark:text-violet-400 dark:border-violet-800/50',
+  USER_UPDATED: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/30 dark:text-amber-400 dark:border-amber-800/50',
+  USER_REMOVED: 'bg-red-50 text-red-700 border-red-200 dark:bg-red-950/30 dark:text-red-400 dark:border-red-800/50',
 }
 
 export function AuditView() {
@@ -45,13 +84,46 @@ export function AuditView() {
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
   const [searchQuery, setSearchQuery] = useState('')
   const [expandedRow, setExpandedRow] = useState<string | null>(null)
+  const [liveEntries, setLiveEntries] = useState<MergedAuditEntry[]>([])
+  const [liveStatus, setLiveStatus] = useState<'loading' | 'connected' | 'unavailable'>('loading')
 
-  const uniqueActions = useMemo(() => [...new Set(auditEntries.map(e => e.action))], [])
-  const uniqueEntityTypes = useMemo(() => [...new Set(auditEntries.map(e => e.entityType))], [])
-  const uniqueUsers = useMemo(() => [...new Set(auditEntries.map(e => e.userName))], [])
+  // Hydrate live audit trail from the server (admin-only endpoint; fail soft)
+  useEffect(() => {
+    let cancelled = false
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch('/api/audit?limit=50', { cache: 'no-store' })
+        if (cancelled) return
+        if (!res.ok) {
+          setLiveStatus('unavailable')
+          return
+        }
+        const json = await res.json()
+        const rows: DbAuditEntry[] = Array.isArray(json?.data) ? json.data : []
+        setLiveEntries(rows.map(mapDbEntry))
+        setLiveStatus('connected')
+      } catch {
+        if (!cancelled) setLiveStatus('unavailable')
+      }
+    }, 0)
+    return () => {
+      cancelled = true
+      clearTimeout(t)
+    }
+  }, [])
+
+  const allEntries = useMemo<MergedAuditEntry[]>(() => {
+    // Live entries first — they carry real timestamps from today and dominate
+    // recency sort anyway; simulated history follows.
+    return [...liveEntries, ...auditEntries]
+  }, [liveEntries])
+
+  const uniqueActions = useMemo(() => [...new Set(allEntries.map(e => e.action))], [allEntries])
+  const uniqueEntityTypes = useMemo(() => [...new Set(allEntries.map(e => e.entityType))], [allEntries])
+  const uniqueUsers = useMemo(() => [...new Set(allEntries.map(e => e.userName))], [allEntries])
 
   const filteredEntries = useMemo(() => {
-    let result = auditEntries.filter((entry) => {
+    let result = allEntries.filter((entry) => {
       if (actionFilter !== 'all' && entry.action !== actionFilter) return false
       if (entityTypeFilter !== 'all' && entry.entityType !== entityTypeFilter) return false
       if (userFilter !== 'all' && entry.userName !== userFilter) return false
@@ -71,7 +143,7 @@ export function AuditView() {
       return sortOrder === 'desc' ? -diff : diff
     })
     return result
-  }, [actionFilter, entityTypeFilter, userFilter, sortOrder, searchQuery])
+  }, [allEntries, actionFilter, entityTypeFilter, userFilter, sortOrder, searchQuery])
 
   const activeFilterCount = [actionFilter, entityTypeFilter, userFilter].filter(f => f !== 'all').length
 
@@ -131,8 +203,21 @@ export function AuditView() {
             <h1 className="text-lg sm:text-xl font-semibold text-foreground">Audit Logs</h1>
             <div className="flex items-center gap-2 mt-0.5">
               <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">
-                {filteredEntries.length} of {auditEntries.length} entries
+                {filteredEntries.length} of {allEntries.length} entries
               </Badge>
+              {liveStatus === 'connected' && (
+                <Badge
+                  variant="outline"
+                  className="text-[10px] px-1.5 py-0 h-4 gap-1 border-emerald-200 text-emerald-700 bg-emerald-50/70 dark:border-emerald-800/60 dark:text-emerald-400 dark:bg-emerald-950/30"
+                  title="Server-recorded actions from custom plans, blocks and user management"
+                >
+                  <span className="relative flex h-1.5 w-1.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-500 opacity-60" />
+                    <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
+                  </span>
+                  LIVE · {liveEntries.length} server
+                </Badge>
+              )}
               {dateRange && (
                 <span className="text-[10px] text-muted-foreground flex items-center gap-1">
                   <CalendarRange className="w-3 h-3" />
@@ -279,15 +364,33 @@ export function AuditView() {
                         )}
                       </TableCell>
                       <TableCell className="text-xs font-mono tabular-nums py-2 text-muted-foreground">
-                        {format(parseISO(entry.timestamp), 'dd MMM yyyy HH:mm')}
+                        <span className="flex items-center gap-1.5">
+                          {entry.isLive && (
+                            <span
+                              className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0 shadow-[0_0_0_3px] shadow-emerald-500/15"
+                              title="Recorded live on the server"
+                            />
+                          )}
+                          {format(parseISO(entry.timestamp), 'dd MMM yyyy HH:mm')}
+                        </span>
                       </TableCell>
                       <TableCell className="py-2">
-                        <Badge
-                          variant="outline"
-                          className={`text-[10px] px-1.5 py-0 h-4 font-mono ${ACTION_BADGE[entry.action] ?? 'bg-muted/50 text-muted-foreground border-border'}`}
-                        >
-                          {entry.action}
-                        </Badge>
+                        <span className="flex items-center gap-1">
+                          <Badge
+                            variant="outline"
+                            className={`text-[10px] px-1.5 py-0 h-4 font-mono ${ACTION_BADGE[entry.action] ?? 'bg-muted/50 text-muted-foreground border-border'}`}
+                          >
+                            {entry.action}
+                          </Badge>
+                          {entry.isLive && (
+                            <Badge
+                              variant="outline"
+                              className="text-[8px] px-1 py-0 h-3 font-semibold tracking-wide border-emerald-300/70 text-emerald-600 bg-emerald-50/60 dark:border-emerald-700/60 dark:text-emerald-400 dark:bg-emerald-950/30"
+                            >
+                              LIVE
+                            </Badge>
+                          )}
+                        </span>
                       </TableCell>
                       <TableCell className="text-xs py-2 capitalize">{entry.entityType}</TableCell>
                       <TableCell className="text-xs font-mono py-2 text-muted-foreground">{entry.entityId}</TableCell>
@@ -317,7 +420,15 @@ export function AuditView() {
                   className="overflow-hidden border-t border-border"
                 >
                   <div className="px-6 py-4 bg-muted/10">
-                    <h4 className="text-xs font-semibold text-foreground mb-2">Entry Details</h4>
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <h4 className="text-xs font-semibold text-foreground">Entry Details</h4>
+                      {entry.isLive && (
+                        <span className="flex items-center gap-1 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+                          <Radio className="w-3 h-3" />
+                          Recorded live on the server
+                        </span>
+                      )}
+                    </div>
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                       <div>
                         <p className="text-[10px] text-muted-foreground uppercase tracking-wider">ID</p>

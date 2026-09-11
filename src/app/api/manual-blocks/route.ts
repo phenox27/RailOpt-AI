@@ -1,6 +1,7 @@
 import { db } from '@/lib/db'
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth, requireRole } from '@/lib/auth-guard'
+import { logAudit } from '@/lib/audit'
 
 /**
  * GET /api/manual-blocks — list manually created blocks (newest first)
@@ -77,6 +78,13 @@ export async function POST(request: NextRequest) {
         // non-fatal — plan link stays eventually consistent via PATCH
       }
     }
+
+    void logAudit(session, {
+      action: 'MANUAL_BLOCK_CREATED',
+      entityType: 'block',
+      entityId: block.id,
+      details: `Created manual block "${block.name}" on ${block.section} (${block.startTime}—${block.endTime}, ${block.duration} min, ${block.department})${block.planId ? ' — linked to plan' : ''}`,
+    })
 
     return NextResponse.json(
       { data: { ...block, maintenanceReqIds: [], isManual: true } },

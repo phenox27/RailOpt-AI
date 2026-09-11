@@ -394,7 +394,7 @@ export function PlansView() {
   const allPlans = useMemo(() => [...customPlans, ...plans], [customPlans])
 
   // All known blocks = simulated + manual blocks created in Planning (persisted)
-  const knownBlocks = useMemo(() => [...blocks, ...manualBlocks], [manualBlocks])
+  const knownBlocks = useMemo(() => [...blocks, ...manualBlocks], [blocks, manualBlocks])
 
   const handleExportJSON = () => exportAllPlansAsJSON(allPlans, knownBlocks)
   const handleExportCSV = () => exportAllPlansAsCSV(allPlans, knownBlocks)

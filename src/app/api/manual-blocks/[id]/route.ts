@@ -1,6 +1,7 @@
 import { db } from '@/lib/db'
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth, requireRole } from '@/lib/auth-guard'
+import { logAudit } from '@/lib/audit'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -19,6 +20,13 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
     if (!existing) return NextResponse.json({ error: 'Block not found' }, { status: 404 })
 
     await db.manualBlock.delete({ where: { id } })
+
+    void logAudit(session, {
+      action: 'MANUAL_BLOCK_DELETED',
+      entityType: 'block',
+      entityId: id,
+      details: `Deleted manual block "${existing.name}" on ${existing.section} (${existing.startTime}—${existing.endTime})`,
+    })
 
     // Unlink from the custom plan (best effort)
     if (existing.planId) {

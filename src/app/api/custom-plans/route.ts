@@ -1,6 +1,7 @@
 import { db } from '@/lib/db'
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth, requireRole } from '@/lib/auth-guard'
+import { logAudit } from '@/lib/audit'
 
 /**
  * GET /api/custom-plans — list user-created plans (newest first)
@@ -57,6 +58,14 @@ export async function POST(request: NextRequest) {
         notes: typeof notes === 'string' && notes.trim() ? notes.trim() : null,
         blockIds: JSON.stringify(Array.isArray(blockIds) ? blockIds : []),
       },
+    })
+
+    const auditSession = session
+    void logAudit(auditSession, {
+      action: 'CUSTOM_PLAN_CREATED',
+      entityType: 'plan',
+      entityId: plan.id,
+      details: `Created custom ${plan.type} plan "${plan.name}" (${plan.startDate} → ${plan.endDate}) by ${plan.createdBy}`,
     })
 
     return NextResponse.json(

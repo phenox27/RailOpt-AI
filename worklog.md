@@ -2108,3 +2108,43 @@ Stage Summary:
 - Role-aware landing makes the team demo feel purpose-built (each member lands where they work)
 - Unresolved/risks: (1) OOM killed the dev server 3× this round (heavy Chrome+compile) — restart procedure works but keep sessions lean; (2) auth-guard requires login for these APIs — offline demo mode (isOffline flag) does not bypass, acceptable; (3) migration is id-diffed but does not reconcile field-level edits of the same plan id (last-write-wins localStorage vs DB) — acceptable for demo
 - Next round suggestions: (1) invited-users persistence via Prisma User model (create endpoint + settings-view write-through); (2) audit-log entries for custom-plan create/delete (action=CUSTOM_PLAN_CREATED etc.) to enrich the Audit view; (3) drag-and-drop block rescheduling on the Planning timeline; (4) PDF export of a custom plan (server-side or print CSS already exists — add a dedicated print layout)
+
+---
+Task ID: cron-review-4
+Agent: main (Z.ai Code, webDevReview cron)
+Task: QA pass + live audit trail (custom plans / manual blocks / user management) + invited-users DB persistence + styling polish
+
+Work Log:
+- QA baseline: dev server healthy (200), fresh reload console clean, per-plan PDF endpoint verified working (/api/export/plan-pdf returns real PDF), leftover "DB Persistence Test" plan from last round deleted via UI
+- BUG FIX: plans-view knownBlocks useMemo had wrong deps ([manualBlocks] → [blocks, manualBlocks]) — simulated blocks changes wouldn't have recomputed the portfolio stats
+- NEW FEATURE A — Live audit trail (closes cron-review-3 suggestion #2):
+  * New src/lib/audit.ts: logAudit(session, {...}) — resolves a real Prisma User for demo session identities (email match → name match → admin fallback, since demo session ids like 'user-admin' are not DB ids); fail-soft, never breaks the main flow
+  * FK safety learned the hard way: AuditLog.planId/blockId/requestId have FK constraints to the standard Plan/Block/MaintenanceRequest tables — CustomPlan/ManualBlock ids live in separate tables and VIOLATE the FK. logAudit now verifies each optional link (findUnique) before writing and drops dangling refs; API calls use entityId + human-readable details instead
+  * Wired into: custom-plans POST (CUSTOM_PLAN_CREATED), PATCH (BLOCK_ADDED_TO_PLAN / BLOCK_REMOVED_FROM_PLAN / CUSTOM_PLAN_UPDATED), DELETE (CUSTOM_PLAN_DELETED), manual-blocks POST/DELETE (MANUAL_BLOCK_CREATED/DELETED), users POST/PATCH/DELETE (USER_INVITED / USER_UPDATED / USER_REMOVED)
+  * audit-view: fetches GET /api/audit?limit=50 (admin-only, fail-soft), merges live + simulated entries, per-row emerald dot + LIVE chip, header "LIVE · N server" badge with ping animation, detail panel "Recorded live on the server" indicator, 10 new action badge colors (saffron=create, red=delete, amber=update, emerald=block-add, violet=user), CSV export includes live entries automatically
+- NEW FEATURE B — Invited-users durable persistence (closes cron-review-3 suggestion #1):
+  * New PROTECTED_USER_EMAILS set in auth-guard (6 demo team + 8 seeded staff emails) — team accounts can never be modified/removed via API
+  * GET /api/users (admin) returns invited users only (notIn protected); POST validates name/email/role, 409 on duplicate, creates Prisma User + USER_INVITED audit; PATCH [id] (role/isActive/name/department, audited); DELETE [id] (invited only, audited)
+  * settings-view users tab: hydrate from DB on mount (localStorage = instant cache/offline fallback, DB = source of truth), optimistic invite flow replaces local id with server record on 201, 409 reconciles by removing the optimistic row, role/status toggles PATCH through for invited users, NEW "Remove user" dropdown action (local + server DELETE + override cleanup)
+  * Acid test PASSED: wiped localStorage+sessionStorage → reload → "Test Invite" still listed (DB hydration)
+- STYLING POLISH:
+  * Audit live badge (emerald, animate-ping dot, respects prefers-reduced-motion kill-switch already in globals.css)
+  * Cloud-synced (green Database icon) / Device-only (amber HardDrive icon) chips in Settings users header + dynamic footer status text
+  * Invite flow loading states: Send Invite button shows spinner + "Saving…", disabled during submit; Cancel disabled too
+  * Remove user menu item with red focus styling + Trash2 icon
+  * Dark mode verified: all new badges/chips have explicit dark variants, contrast good (screenshot-verified light + dark)
+
+Verification Results (agent-browser + direct DB):
+- Create plan as Dhittika → CUSTOM_PLAN_CREATED in DB (userName "Dhittika") → Audit view shows "LIVE · 10 server", entry with LIVE chip, expandable details correct
+- Delete plan → CUSTOM_PLAN_DELETED recorded (after FK fix; the first create attempt exposed the FK violation, fixed in logAudit)
+- Invite "Test Invite" (test-invite@railopt.ai) → User row in DB + USER_INVITED audit + toast "saved to the server" + Cloud-synced chip
+- Change role engineering→planner → DB role updated + USER_UPDATED audit "fields: role"
+- Remove user → DB count 0 + USER_REMOVED audit "(was planner)" + table clean
+- Per-role landing still works (Jeet → Planning); sign-out → landing page → sign-in flows all functional
+- Console: 0 errors/warnings (fresh reload, light + dark); lint: 0 errors; DB left clean (0 custom plans, 0 invited users, audit history preserved as demo data)
+
+Stage Summary:
+- Shipped: full live audit trail for all planner/admin mutations (plans, blocks, users) with FK-safe attribution, durable invited-user management with optimistic UI + server reconciliation, styling polish with dark-mode variants
+- All buttons functional; team demo names untouched (Dhittika, Jeet, Diya, Debarshi, Rupam, Alivia)
+- Unresolved/risks: (1) /api/users is admin-only — non-admin Settings access doesn't exist in nav so no exposure, but if settings is ever opened for planners the tab will show "Device-only" fallback (graceful); (2) audit view merge shows seeded DB entries with LIVE chip too (semantically correct — they are server records; slight visual duplication with simulated entries of same actions); (3) same OOM caveat as before — keep edit+test cycles lean; (4) user status overrides for TEAM accounts remain localStorage-only by design
+- Next round suggestions: (1) drag-and-drop block rescheduling on the Planning timeline (long-standing suggestion, biggest UX win left); (2) audit view pagination/load-more for the live feed + auto-refresh (e.g. refetch on view focus); (3) per-custom-plan print layout ("Corridor Summary" A4 sheet) complementing the existing JSON/CSV/PDF exports; (4) USER_INVITED entries could carry the invited user's id in entityId (currently the acting admin's DB user is attributed via userName only)
