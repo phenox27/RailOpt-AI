@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import type { Variants } from 'framer-motion'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -27,18 +28,15 @@ import {
 import { Separator } from '@/components/ui/separator'
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent, DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
-import { useAppStore, type Role } from '@/store/app-store'
+import { useAppStore } from '@/store/app-store'
 import { useTheme } from 'next-themes'
 import { departmentSummary, maintenanceRequests } from '@/data/simulated-data'
 import { toast } from 'sonner'
 import {
   Settings,
   User,
-  Building2,
   Wifi,
   WifiOff,
-  CalendarClock,
-  Palette,
   Sun,
   Moon,
   Monitor,
@@ -46,10 +44,8 @@ import {
   Clock,
   Save,
   Info,
-  Code2,
   Shield,
   Calendar,
-  FileText,
   Bell,
   BellRing,
   Mail,
@@ -60,7 +56,6 @@ import {
   MoonStar,
   Eye,
   LayoutGrid,
-  List,
   Pencil,
   UserPlus,
   MoreHorizontal,
@@ -68,7 +63,6 @@ import {
   UserX,
   ShieldCheck,
   MapPin,
-  LogOut,
   Search,
   Users,
   Database,
@@ -146,7 +140,7 @@ const ACCENT_COLORS = [
   { name: 'Amber', value: 'amber', color: 'bg-amber-500' },
 ]
 
-const tabContentVariants = {
+const tabContentVariants: Variants = {
   hidden: { opacity: 0, y: 12 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.3, ease: 'easeOut' } },
   exit: { opacity: 0, y: -8, transition: { duration: 0.15 } },
@@ -1432,13 +1426,11 @@ export function SettingsView() {
 
                       <div className="space-y-3">
                         {[
-                          { icon: Info, label: 'Version', value: '1.0.0 (MVP)' },
-                          { icon: Calendar, label: 'Build Date', value: '2025-01-27' },
-                          { icon: Shield, label: 'License', value: 'Indian Railways — Internal Use Only' },
-                          { icon: Code2, label: 'Tech Stack', value: 'Next.js 16 · TypeScript · Tailwind CSS · Prisma' },
-                          { icon: FileText, label: 'UI Framework', value: 'shadcn/ui · Radix · Framer Motion' },
-                          { icon: Building2, label: 'Database', value: 'SQLite (via Prisma ORM)' },
-                        ].map(({ icon: Icon, label, value }, idx) => (
+   { icon: Info, label: 'Version', value: '1.0.0 (MVP)' },
+  { icon: Calendar, label: 'Build Date', value: '2025-01-27' },
+  { icon: Shield, label: 'License', value: 'SIH Prototype — For Demonstration' },
+  { icon: Settings, label: 'Platform', value: 'AI-Powered Railway Operations' },
+].map(({ icon: Icon, label, value }, idx) => (
                           <div key={idx} className="flex items-start gap-3 p-3 rounded-lg border border-border/50">
                             <Icon className="w-4 h-4 text-muted-foreground mt-0.5 shrink-0" />
                             <div className="min-w-0">
